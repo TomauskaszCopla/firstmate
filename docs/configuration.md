@@ -290,8 +290,9 @@ The stage receipt distinguishes `hook_fired`, `snapshot_captured`, `worker_start
 An explicit `/stow` uses `state/.stow-manual-reservation.json`; automatic compaction refuses while that reservation is active, and an explicit Stow refuses while an automatic job is pending or holds the writer lock.
 
 Session-start reconciliation runs after successful fleet-lock acquisition.
-It retires a verified surviving agent process group before replacement, restarts a nonterminal worker from frozen evidence, reuses a settled combined result, never replays a started-but-unsettled combined agent or legacy two-pass agent, or finalizes a completion that was published just before interruption.
-A process group whose ownership cannot be proved blocks replacement instead of being signalled or overlapped.
+It retires a verified surviving agent process group before replacement, restarts a nonterminal worker from frozen evidence, reuses a settled combined result, never replays a started-but-unsettled combined agent, or finalizes a completion that was published just before interruption.
+A process group whose ownership cannot be proved blocks replacement instead of being signalled or overlapped, and a boundary blocked by another home's surviving agent stays recoverable rather than terminal.
+A capture attempt stopped by an earlier session is promoted to its deduplicated job when its boundary was fully captured, and is otherwise recorded as a failed, not reset-safe capture.
 A missing or failed Retrospective preserves completed local Stow writes but leaves the combined receipt incomplete and not reset-safe.
 Settled terminal evidence is pruned after 14 days; running, recoverable, and unresolved staged evidence is retained.
 There is no explicit cancellation feature or active-work time-to-live, so an explicit Stow retains exclusion until its pass completes or its owning session ends.

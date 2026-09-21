@@ -18,7 +18,8 @@ Automatic Stow is primary-only.
 It never launches secondmate curation or writes a registered secondmate home; an explicit primary `/stow` retains the existing cascade.
 
 The combined agent records one started boundary, one settled boundary, and one process return code.
-Reconciliation reuses a settled combined result and never replays a started-but-unsettled combined agent or legacy two-pass agent whose side effects are uncertain.
+Reconciliation reuses a settled combined result and never replays a started-but-unsettled combined agent whose side effects are uncertain.
+A capture attempt stopped before publication is promoted when its boundary was fully captured, and is otherwise settled as a failed capture.
 The worker records the agent's isolated process group before releasing its start barrier, and lock-owner reconciliation retires a verified surviving group before it starts a replacement worker.
 An identity-mismatched or leaderless numeric process group is preserved and reported instead of being signalled or overlapped.
 The ordinary session-start path invokes reconciliation immediately after successful fleet-lock acquisition, including resume and re-emit flows.

@@ -34,12 +34,25 @@ EOF
   cat > "$home/bin/fm-fleet-snapshot.sh" <<'EOF'
 #!/usr/bin/env bash
 if [ -n "${FM_TEST_SNAPSHOT_HOLD:-}" ]; then
+  printf '%s\n' "$PPID" > "$FM_TEST_SNAPSHOT_HOLD.pid"
   : > "$FM_TEST_SNAPSHOT_HOLD.ready"
   while [ -e "$FM_TEST_SNAPSHOT_HOLD" ]; do sleep 0.05; done
 fi
 printf '%s\n' '{"schema":"fm-fleet-snapshot.v1","tasks":[],"backlog":{"records":[]}}'
 EOF
   chmod +x "$home/bin/fm-stow-precompact.sh" "$home/bin/fm-fleet-snapshot.sh"
+  cat > "$fakebin/mv" <<EOF
+#!/usr/bin/env bash
+set -u
+if [ "\${1:-}" = -- ] && [ -n "\${FM_TEST_PROMOTE_HOLD:-}" ]; then
+  printf '%s\\n' "\$PPID" > "\$FM_TEST_PROMOTE_HOLD.pid"
+  : > "\$FM_TEST_PROMOTE_HOLD.ready"
+  while [ -e "\$FM_TEST_PROMOTE_HOLD" ]; do sleep 0.05; done
+  exit 1
+fi
+exec $(command -v mv) "\$@"
+EOF
+  chmod +x "$fakebin/mv"
   printf '%s\n' "$$" > "$home/state/.lock"
 
   plugin=$home/codex-home/plugins/cache/ai-team-skills/ai-team-tomas-skills/9.8.7/skills/retrospective
@@ -792,9 +805,143 @@ EOF
   pass "live-state guard rejects a dead original session owner"
 }
 
+kill_held_hook() { # <hold>
+  local hold=$1 pid i=0
+  pid=$(cat "$hold.pid" 2>/dev/null || true)
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -9 "$pid" 2>/dev/null || true
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 100 ]; do sleep 0.05; i=$((i + 1)); done
+  rm -f -- "$hold"
+}
+
+expire_session_lock() { # <home>
+  local home=$1 dead_pid
+  sleep 30 &
+  dead_pid=$!
+  kill "$dead_pid" 2>/dev/null || true
+  wait "$dead_pid" 2>/dev/null || true
+  printf '%s\n' "$dead_pid" > "$home/state/.lock"
+}
+
+test_ambiguous_agent_group_leaves_a_boundary_restartable() {
+  local record home fakebin input job_a job_b sleeper sleeper_pgid dead_pid
+
+  record=$(make_home ambiguous-group)
+  IFS=$'\t' read -r home fakebin <<EOF
+$record
+EOF
+  printf '%s\n' '{"a":1}' > "$home/transcript-a.jsonl"
+  printf '%s\n' '{"b":2}' > "$home/transcript-b.jsonl"
+  input=$(payload "$home" "$home/transcript-a.jsonl" manual)
+  run_hook "$home" "$fakebin" "$input" codex >/dev/null \
+    || fail "the first boundary did not start"
+  job_a=$(job_dir "$home")
+  wait_for_file "$job_a/completion.json" || fail "the first boundary never settled"
+
+  set -m
+  sleep 60 &
+  sleeper=$!
+  set +m
+  sleeper_pgid=$(ps -o pgid= -p "$sleeper" | tr -d '[:space:]')
+  [ -n "$sleeper_pgid" ] || fail "no surviving agent group could be created"
+  sleep 30 &
+  dead_pid=$!
+  kill "$dead_pid" 2>/dev/null || true
+  wait "$dead_pid" 2>/dev/null || true
+  jq --argjson pid "$dead_pid" --argjson pgid "$sleeper_pgid" \
+    '.active_agent={pid:$pid,identity:"gone-leader",pgid:$pgid}' \
+    "$job_a/receipt.json" > "$job_a/receipt.tmp"
+  mv "$job_a/receipt.tmp" "$job_a/receipt.json"
+
+  input=$(payload "$home" "$home/transcript-b.jsonl" manual)
+  run_hook "$home" "$fakebin" "$input" codex >/dev/null \
+    || fail "the second boundary did not start"
+  job_b=$(find "$home/data/stow-precompact" -mindepth 1 -maxdepth 1 -type d \
+    ! -name attempts ! -path "$job_a" | head -1)
+  [ -n "$job_b" ] || fail "the second boundary published no job"
+  wait_for_receipt_state "$job_b/receipt.json" interrupted \
+    || fail "an unprovable foreign agent group did not leave the boundary restartable"
+  [ ! -f "$job_b/completion.json" ] || fail "the blocked boundary published a completion"
+  [ "$(wc -l < "$home/agent.log" | tr -d ' ')" = 1 ] \
+    || fail "the blocked boundary started an overlapping agent"
+
+  kill -9 "$sleeper" 2>/dev/null || true
+  wait "$sleeper" 2>/dev/null || true
+  run_reconcile "$home" "$fakebin" || fail "reconciliation after the conflict failed"
+  wait_for_file "$job_b/completion.json" \
+    || fail "the blocked boundary never resumed after the foreign group exited"
+  jq -e '.state == "complete" and .reset_safe == true' "$job_b/completion.json" >/dev/null \
+    || fail "the resumed boundary did not complete normally"
+  pass "an unprovable foreign agent group defers a boundary instead of failing it"
+}
+
+test_stopped_capture_attempts_are_reconciled() {
+  local record home fakebin transcript input hold attempts attempt job
+
+  record=$(make_home capture-incomplete)
+  IFS=$'\t' read -r home fakebin <<EOF
+$record
+EOF
+  transcript=$home/transcript.jsonl
+  printf '%s\n' '{}' > "$transcript"
+  input=$(payload "$home" "$transcript" manual)
+  attempts=$home/data/stow-precompact/attempts
+  hold=$home/snapshot-hold
+  : > "$hold"
+  run_hook "$home" "$fakebin" "$input" codex FM_TEST_SNAPSHOT_HOLD="$hold" >/dev/null 2>&1 &
+  wait_for_file "$hold.ready" || fail "capture never entered the open-work snapshot"
+  kill_held_hook "$hold" || fail "the held capture hook could not be stopped"
+  attempt=$(find "$attempts" -mindepth 1 -maxdepth 1 -type d | head -1)
+  [ -n "$attempt" ] || fail "the stopped capture left no attempt"
+  jq -e '.state == "hook_fired"' "$attempt/receipt.json" >/dev/null \
+    || fail "the stopped capture was not left mid-capture"
+  expire_session_lock "$home"
+  run_reconcile "$home" "$fakebin" || fail "attempt reconciliation failed"
+  jq -e '
+    .state == "failed" and .reset_safe == false
+    and (.finished | type == "string")
+    and (.error | contains("interrupted before publication"))
+  ' "$attempt/receipt.json" >/dev/null \
+    || fail "an incomplete capture attempt was left without an explicit outcome"
+  [ -z "$(job_dir "$home")" ] || fail "an incomplete capture attempt was promoted to a job"
+  [ ! -s "$home/agent.log" ] || fail "an incomplete capture attempt replayed model work"
+
+  record=$(make_home capture-unpromoted)
+  IFS=$'\t' read -r home fakebin <<EOF
+$record
+EOF
+  transcript=$home/transcript.jsonl
+  printf '%s\n' '{}' > "$transcript"
+  input=$(payload "$home" "$transcript" manual)
+  attempts=$home/data/stow-precompact/attempts
+  hold=$home/promote-hold
+  : > "$hold"
+  run_hook "$home" "$fakebin" "$input" codex FM_TEST_PROMOTE_HOLD="$hold" >/dev/null 2>&1 &
+  wait_for_file "$hold.ready" || fail "capture never reached job publication"
+  kill_held_hook "$hold" || fail "the held publication hook could not be stopped"
+  attempt=$(find "$attempts" -mindepth 1 -maxdepth 1 -type d | head -1)
+  [ -n "$attempt" ] || fail "the unpromoted capture left no attempt"
+  jq -e '.state == "snapshot_captured" and (.job_id | length == 32)' \
+    "$attempt/receipt.json" >/dev/null \
+    || fail "the unpromoted capture did not freeze a complete boundary"
+  [ -z "$(job_dir "$home")" ] || fail "the capture was promoted before reconciliation"
+  expire_session_lock "$home"
+  run_reconcile "$home" "$fakebin" || fail "unpromoted attempt reconciliation failed"
+  [ ! -d "$attempt" ] || fail "a complete capture attempt was not promoted"
+  job=$(job_dir "$home")
+  [ -n "$job" ] || fail "a complete capture attempt reached no canonical job"
+  wait_for_file "$job/completion.json" \
+    || fail "the recovered boundary never settled"
+  jq -e '.state == "complete" and .reset_safe == true' "$job/completion.json" >/dev/null \
+    || fail "the recovered boundary did not complete normally"
+  [ "$(wc -l < "$home/agent.log" | tr -d ' ')" = 1 ] \
+    || fail "the recovered boundary did not run exactly one combined agent"
+  pass "stopped capture attempts are promoted or explicitly settled"
+}
+
 test_combined_agent_is_not_replayed() {
   local mode record home fakebin transcript input job before
-  for mode in interrupted legacy settled nonzero; do
+  for mode in interrupted settled nonzero; do
     record=$(make_home "resume-$mode")
     IFS=$'\t' read -r home fakebin <<EOF
 $record
@@ -818,15 +965,6 @@ EOF
         | del(.stages.agent_finished,.stages.completion_published)
         | .stages.agent_started="2026-09-16T00:00:00Z"
         | .agent_rc=null | del(.stow_status,.retrospective_status)
-      ' "$job/receipt.json" > "$job/receipt.tmp"
-    elif [ "$mode" = legacy ]; then
-      jq '
-        .state="running" | .reset_safe=false | del(.finished,.agent_rc)
-        | .worker={pid:null,identity:null,attempt:"interrupted",started:null}
-        | .active_agent=null
-        | del(.stages.agent_started,.stages.agent_finished,.stages.completion_published)
-        | .stages.stow_started="2026-09-16T00:00:00Z"
-        | del(.stow_status,.retrospective_status)
       ' "$job/receipt.json" > "$job/receipt.tmp"
     elif [ "$mode" = settled ]; then
       jq '
@@ -1157,6 +1295,8 @@ test_snapshot_failure_refuses_both_hook_hosts
 test_stale_manual_reservation_reconciles
 test_secondmate_manual_reservation_without_automatic_hook
 test_guard_requires_live_original_session
+test_ambiguous_agent_group_leaves_a_boundary_restartable
+test_stopped_capture_attempts_are_reconciled
 test_combined_agent_is_not_replayed
 test_exceptions_prevent_reset_safety
 test_snapshot_capture_reconciles

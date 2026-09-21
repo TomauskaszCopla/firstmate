@@ -148,6 +148,18 @@ receipt_update() { # <job-dir> <jq-filter> [jq args...]
   return "$rc"
 }
 
+receipt_session_live() { # <receipt-dir>
+  local dir=$1 expected expected_identity current current_identity
+  expected=$(jq -r '.session_lock_pid // empty' "$dir/receipt.json" 2>/dev/null || true)
+  expected_identity=$(jq -r '.session_lock_identity // empty' "$dir/receipt.json" 2>/dev/null || true)
+  current=$(cat "$STATE/.lock" 2>/dev/null || true)
+  case "$expected" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$current" = "$expected" ] || return 1
+  fm_pid_alive "$expected" || return 1
+  current_identity=$(fm_pid_identity "$expected" 2>/dev/null || true)
+  [ -n "$expected_identity" ] && [ "$current_identity" = "$expected_identity" ]
+}
+
 worker_alive() { # <job-dir>
   local job=$1 pid expected actual
   pid=$(jq -r '.worker.pid // empty' "$job/receipt.json" 2>/dev/null || true)
@@ -874,7 +886,7 @@ run_worker() { # <job-id> <attempt>
   receipt=$job/receipt.json
   local pid identity transcript_sha snapshot_sha expected transcript_bytes actual_bytes i=0
   local harness retrospective='' retrospective_sha='' stow_skill stow_sha workspace=''
-  local agent_started agent_finished agent_rc=null legacy_started=0
+  local agent_started agent_finished agent_rc=null
   local stow_status retrospective_status combined reset_safe finished tmp
   case "$job_id" in *[!0-9a-f]*|'') exit 2 ;; esac
   [ "${#job_id}" -eq 32 ] && [ -d "$job" ] && [ ! -L "$job" ] && [ -f "$receipt" ] || exit 2
@@ -908,7 +920,11 @@ run_worker() { # <job-id> <attempt>
   receipt_update "$job" '.state="running" | .stages.writer_lock_acquired=$at' \
     --arg at "$(now_iso)" || exit 1
   if foreign_agent_conflict "$job"; then
-    job_failure "$job" 'another detached Stow agent is still writing this home'
+    receipt_update "$job" '
+        .state="interrupted" | .reset_safe=false
+        | .error="another detached Stow agent is still writing this home"
+        | .stages.interrupted=$at
+      ' --arg at "$(now_iso)" || true
     exit 1
   fi
 
@@ -940,8 +956,6 @@ run_worker() { # <job-id> <attempt>
   agent_finished=$(jq -r '.stages.agent_finished // empty' "$receipt" 2>/dev/null || true)
   agent_rc=$(jq -r 'if (.agent_rc | type) == "number" then .agent_rc else "null" end' \
     "$receipt" 2>/dev/null || printf 'null\n')
-  jq -e '(.stages.stow_started? != null) or (.stages.retrospective_started? != null)' \
-    "$receipt" >/dev/null 2>&1 && legacy_started=1
 
   if [ -n "$agent_finished" ] && [ "$agent_rc" = 0 ] \
     && combined_result_agent_valid "$job/combined-result.json"; then
@@ -955,7 +969,7 @@ run_worker() { # <job-id> <attempt>
       "No valid combined structured result was produced." \
       "The combined agent did not publish a valid Retrospective outcome." \
       "Retrospective completion is uncertain." || exit 1
-  elif [ -n "$agent_started" ] || [ -n "$agent_finished" ] || [ "$legacy_started" -eq 1 ]; then
+  elif [ -n "$agent_started" ] || [ -n "$agent_finished" ]; then
     [ ! -f "$job/combined-result.json" ] \
       || cp -p -- "$job/combined-result.json" "$job/combined-result.unsettled.json" 2>/dev/null \
       || exit 1
@@ -1091,20 +1105,42 @@ run_worker() { # <job-id> <attempt>
 }
 
 guard_job() { # <job-id>
-  local job_id job expected expected_identity current current_identity
-  job_id=$1
-  job=$RUNS/$job_id
+  local job_id=$1 job=$RUNS/$1
   case "$job_id" in *[!0-9a-f]*|'') return 2 ;; esac
   [ "${#job_id}" -eq 32 ] && [ -f "$job/receipt.json" ] || return 2
   load_runtime_libs || return 1
-  expected=$(jq -r '.session_lock_pid // empty' "$job/receipt.json" 2>/dev/null || true)
-  expected_identity=$(jq -r '.session_lock_identity // empty' "$job/receipt.json" 2>/dev/null || true)
-  current=$(cat "$STATE/.lock" 2>/dev/null || true)
-  case "$expected" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$current" = "$expected" ] || return 1
-  fm_pid_alive "$expected" || return 1
-  current_identity=$(fm_pid_identity "$expected" 2>/dev/null || true)
-  [ -n "$expected_identity" ] && [ "$current_identity" = "$expected_identity" ] || return 1
+  receipt_session_live "$job"
+}
+
+reconcile_attempts() {
+  local receipt attempt state job_id job rc=0
+  [ -d "$RUNS/attempts" ] || return 0
+  fm_lock_acquire_wait "$PUBLISH_LOCK"
+  for receipt in "$RUNS"/attempts/*/receipt.json; do
+    [ -f "$receipt" ] && [ ! -L "$receipt" ] || continue
+    attempt=${receipt%/receipt.json}
+    [ -d "$attempt" ] && [ ! -L "$attempt" ] || continue
+    receipt_session_live "$attempt" && continue
+    state=$(jq -r '.state // empty' "$receipt" 2>/dev/null || true)
+    case "$state" in complete|incomplete|failed) continue ;; esac
+    job_id=$(jq -r '.job_id // empty' "$receipt" 2>/dev/null || true)
+    case "$job_id" in *[!0-9a-f]*|'') job_id= ;; esac
+    [ "${#job_id}" -eq 32 ] || job_id=
+    if [ "$state" = snapshot_captured ] && [ -n "$job_id" ]; then
+      job=$RUNS/$job_id
+      if [ -L "$job" ]; then
+        rc=1
+      elif [ -d "$job" ]; then
+        rm -rf -- "$attempt" || rc=1
+      else
+        mv -- "$attempt" "$job" || rc=1
+      fi
+      continue
+    fi
+    job_failure_locked "$attempt" 'the boundary capture was interrupted before publication'
+  done
+  fm_lock_release "$PUBLISH_LOCK"
+  return "$rc"
 }
 
 reconcile_jobs() {
@@ -1122,6 +1158,7 @@ reconcile_jobs() {
   fm_lock_release "$PUBLISH_LOCK"
   [ "$manual_active" -eq 0 ] || return "$rc"
   [ -d "$RUNS" ] || return "$rc"
+  reconcile_attempts || rc=1
   for receipt in "$RUNS"/*/receipt.json; do
     [ -f "$receipt" ] || continue
     job=${receipt%/receipt.json}
