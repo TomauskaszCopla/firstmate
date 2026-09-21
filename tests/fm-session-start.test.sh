@@ -884,6 +884,31 @@ EOF
   pass "locked session start freezes trace context and lock refusal leaves it unchanged"
 }
 
+test_locked_start_reconciles_stow_state() {
+  local rec root home fakebin out
+  rec=$(new_world stow-reconcile-after-lock)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_harness "$fakebin" codex
+  mkdir -p "$root/bin"
+  printf '%s\n' 'fixture' > "$root/AGENTS.md"
+  jq -n --argjson pid "$SESSION_START_TEST_HARNESS_PID" '
+    {schema:"fm-stow-manual-reservation.v1",session_lock_pid:$pid,
+     session_lock_identity:"stale-identity",started:"2026-01-01T00:00:00Z"}
+  ' > "$home/state/.stow-manual-reservation.json"
+
+  out=$(run_named_harness_session_start codex "$home" "$root" "$fakebin:$BASE_PATH")
+  assert_contains "$out" "lock acquired: harness pid" \
+    "Stow reconciliation fixture did not acquire the real session lock"
+  assert_not_contains "$out" "STOW_RECONCILE: failed" \
+    "post-lock Stow reconciliation reported a failure"
+  [ ! -e "$home/state/.stow-manual-reservation.json" ] \
+    || fail "a successful session-lock acquisition left stale Stow state unreconciled"
+  pass "a locked session start reconciles stale Stow state at the ownership boundary"
+}
+
 test_session_lock_concurrent_single_winner() {
   local rec root home fakebin ready completed winners pids i pid count
   rec=$(new_world lock-concurrency)
@@ -2674,6 +2699,7 @@ test_context_digest_absent_empty_present
 test_lock_refusal_read_only_path
 test_lock_write_failure_read_only_path
 test_trace_context_effective_state_is_frozen_after_lock
+test_locked_start_reconciles_stow_state
 test_session_lock_concurrent_single_winner
 test_output_ordering_diagnostics_lead
 test_read_once_contract_is_stated_once_before_its_subject

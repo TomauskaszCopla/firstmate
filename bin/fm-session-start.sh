@@ -651,7 +651,17 @@ fi
 REBUILDING_SESSION_PID=$(fm_harness_ancestry_pid 2>/dev/null || true)
 print_agents_refresh_if_required "$REBUILDING_SESSION_PID"
 
+# Post-lock Stow reconciliation is the first locked bootstrap mutation.
+# Advance the timeout breadcrumb before it so an interrupted reconciliation is
+# reported as unfinished bootstrap work rather than incomplete lock ownership.
+stage bootstrap
 if [ "$READ_ONLY" -eq 0 ]; then
+  STOW_RECONCILE_OUT=$("$SCRIPT_DIR/fm-stow-precompact.sh" reconcile-owned 2>&1)
+  STOW_RECONCILE_RC=$?
+  if [ "$STOW_RECONCILE_RC" -ne 0 ]; then
+    printf 'STOW_RECONCILE: failed after fleet-lock acquisition; recoverable pre-compaction work was not replaced.\n'
+    [ -z "$STOW_RECONCILE_OUT" ] || printf '%s\n' "$STOW_RECONCILE_OUT"
+  fi
   if [ "$REEMIT" -eq 0 ]; then
     rm -f "$COMPLETION_FILE" 2>/dev/null || true
   fi

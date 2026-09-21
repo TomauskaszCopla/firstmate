@@ -77,6 +77,17 @@ While the flag is present:
 
 Every `/stow` invocation performs this complete pass, even when the session contains no new finding:
 
+Before step 1, serialize this home's memory writer:
+
+- In an ordinary explicit invocation, run `bin/fm-stow-precompact.sh manual-begin`. Stop before reading or writing memory if it refuses. Keep that reservation through the local pass, the primary cascade, and the mandatory Retrospective below. Run `bin/fm-stow-precompact.sh manual-end` only after Retrospective finishes or fails, immediately before emitting the combined receipt.
+- When `FM_STOW_HOOK_WORKER=1`, the pre-compaction launcher already holds `state/.stow-memory-writer.lock` across both ordered agent passes.
+  Do not create or release a manual reservation.
+  Complete the primary home's local Stow pass, then dynamically resolve and run the installed Retrospective in the same agent session, and return both structured outcomes to the launcher.
+  The launcher remains the sole owner of `completion.json`.
+  Automatic Stow never runs the secondmate cascade, sends a secondmate Stow request, or writes a registered secondmate home.
+  Shared captain preferences remain primary-owned under their existing contract.
+- Never delete, replace, steal, or bypass either reservation. A refusal means another Stow writer owns the home, not permission to continue without serialization.
+
 1. Run `bin/fm-startup-memory-budget.sh report` before considering a write.
    Record its effective budget and each file's estimated-token total.
    The budget is per home: this home's three files against this home's own allowance, never a fleet total.
@@ -270,11 +281,13 @@ Report the outcome in plain captain-facing language with all of these facts:
 State what reset-safe means in the same breath as the claim: nothing this session knew has been lost.
 It is never a claim that the home's durable records are correct, because this pass checks no record the session did not name.
 Do not hide an over-budget result behind a reset-safe claim.
-In a primary home the receipt is written after the cascade below, not instead of it.
+In an explicit primary-home invocation the receipt is written after the cascade below, not instead of it.
+An automatic pre-compaction receipt covers the primary home only.
 
 ## Automatic cascade to secondmates
 
-In a primary home, every `/stow` cascades to every registered secondmate after this home's own required pass and knowledge sweep are complete.
+In a primary home, every explicit `/stow` cascades to every registered secondmate after this home's own required pass and knowledge sweep are complete.
+Automatic pre-compaction Stow is primary-only and skips this section completely.
 In a secondmate home, `/stow` curates that home only and never cascades further.
 The cascade changes nothing until `/stow` is invoked: it adds no notification, no digest section, and no background work.
 
@@ -299,6 +312,22 @@ Offload proposals and the cold archive are per-home: file proposals only in the 
 Extend the completion receipt with one entry per secondmate alongside the primary's own, carrying that home's budget before and after, its per-file actions, its exceptions, and whether that home swept itself or was curated from here.
 Keep those entries in the same plain captain-facing language the rest of the receipt uses.
 The session is reset-safe only when every home is within its own budget with no unresolved exception.
+
+## Mandatory Retrospective before completion
+
+Every Stow runs the currently installed `ai-team-tomas-skills:retrospective` exactly once after the local pass and any authorized explicit primary cascade, and before the completion receipt.
+Resolve the entrypoint with `bin/fm-stow-precompact.sh retrospective-path --harness codex` in a Codex session or `bin/fm-stow-precompact.sh retrospective-path --harness claude` in a Claude session.
+Do not fall back to the other provider; read the returned `SKILL.md` completely and follow it.
+The explicit-only status of that dependency does not remove this standing user authorization.
+Never pin a plugin cache version or reuse a path resolved before an update or restart.
+
+An ordinary explicit Stow invokes Retrospective in the same session, then releases its manual reservation and emits one combined receipt.
+The automatic pre-compaction agent runs Retrospective after its local Stow pass and returns both structured outcomes to its launcher.
+That agent must not emit or imply a completion receipt on its own; the launcher writes `completion.json` only after the combined attempt settles.
+
+If Retrospective is missing, unavailable, or fails, preserve every completed local Stow write, release the manual reservation when applicable, and report the combined invocation incomplete.
+Never call that result reset-safe.
+The completion receipt must state the local Stow outcome and the Retrospective outcome separately, including a proved no-change Retrospective as success and every unresolved gate or exact error as an exception.
 
 ## Scope exclusion: no skill storage by the pass
 

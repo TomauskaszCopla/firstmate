@@ -10,8 +10,8 @@ The shared orchestrator behavior lives in [`AGENTS.md`](../AGENTS.md) - edit it 
 
 This section is the single owner of the top-level operational-home layout; producer script headers and their help own exact child-file fields and mutation contracts.
 The tracked code root contains the shared instruction, skill, documentation, workflow, and `bin/` surfaces, while each effective `FM_HOME` contains private operational directories.
-`data/` holds durable private fleet records such as the project and secondmate registries, captain preferences, optional shared captain preferences, learnings, backlog, briefs, scout reports, and explicitly installed content-addressed extension packages under `data/extensions/packages/`.
-`state/` holds runtime records such as task metadata, append-only status events, endpoint signals, watcher and wake-queue coordination, inactive terminal-outcome receipts under `state/terminal-outcomes/`, enabled extension working namespaces under `state/extensions/`, away-mode state, generated Relay artifacts, parent-side remote ledger copies under `state/secondmate-summary-cache/`, one-shot Bearings reconcile requests under `state/reconcile-notify/`, private secondmate config-reread generations with their retry and quarantine state, per-task steering-inbox records under `state/<id>.inbox/` (`bin/fm-task-inbox-lib.sh`), and parent-owned secondmate pending-reply records under `state/pending-replies/` (`bin/fm-pending-reply-lib.sh`).
+`data/` holds durable private fleet records such as the project and secondmate registries, captain preferences, optional shared captain preferences, learnings, backlog, briefs, scout reports, automatic pre-compaction Stow records under `data/stow-precompact/`, and explicitly installed content-addressed extension packages under `data/extensions/packages/`.
+`state/` holds runtime records such as task metadata, append-only status events, endpoint signals, watcher and wake-queue coordination, automatic Stow publication and writer locks, inactive terminal-outcome receipts under `state/terminal-outcomes/`, enabled extension working namespaces under `state/extensions/`, away-mode state, generated Relay artifacts, parent-side remote ledger copies under `state/secondmate-summary-cache/`, one-shot Bearings reconcile requests under `state/reconcile-notify/`, private secondmate config-reread generations with their retry and quarantine state, per-task steering-inbox records under `state/<id>.inbox/` (`bin/fm-task-inbox-lib.sh`), and parent-owned secondmate pending-reply records under `state/pending-replies/` (`bin/fm-pending-reply-lib.sh`).
 `config/` holds local gitignored operating choices, including explicit extension bindings under `config/extensions.d/`, and `projects/` holds the local project clones that Firstmate reads but changes only through the narrow guarded and concrete captain-approved exceptions in `AGENTS.md`.
 Untracked files and directories whose names begin with `scratchpad` are also gitignored, so temporary scratch does not make porcelain-based secondmate sync guards treat a home as dirty.
 
@@ -275,6 +275,30 @@ Opt in for a home that stows often enough that entries never sit unreinforced fo
 The flag is per home and is not inherited by secondmate homes, because stow cadence is a property of the home doing the stowing.
 Only the file's presence is read, so its contents are ignored; remove it to return to the default contract on the next pass.
 The skill text owns the marker spelling, the tick order, and the reinforcement rule.
+
+## Automatic pre-compaction Stow
+
+Tracked Codex and Claude `PreCompact` hooks call `bin/fm-stow-precompact.sh` only from the lock-owning primary session in a plain Firstmate checkout.
+The synchronous hook freezes the exact transcript prefix and a structured fleet snapshot under `data/stow-precompact/<job>/`, deduplicates the session boundary, launches an operating-system-detached worker, and returns only after that worker publishes a verified start handshake.
+Linked task worktrees, secondmate homes, foreign-host duplicate hook deliveries, detached Stow workers, and sessions that do not own this home's session lock stand down without creating a job.
+
+The detached worker holds `state/.stow-memory-writer.lock` and launches exactly one headless agent through the provider that invoked the hook: Codex for a Codex hook or Claude for a Claude hook, with no cross-provider fallback.
+That agent runs the primary home's local Stow pass without a secondmate cascade, then dynamically resolves and runs the current installed `ai-team-tomas-skills:retrospective` for the same provider in the same session.
+The worker writes `completion.json` only after the combined agent settles.
+The stage receipt distinguishes `hook_fired`, `snapshot_captured`, `worker_started`, the combined agent's started and settled boundaries, its process return code, the verified Retrospective entrypoint and hash, and terminal completion or failure.
+`worker_started` is never reset-safety proof: capture completes before compaction, but the hook does not wait for full Stow and Retrospective completion, which is asynchronous and can overlap the compacted session's continuation.
+An explicit `/stow` uses `state/.stow-manual-reservation.json`; automatic compaction refuses while that reservation is active, and an explicit Stow refuses while an automatic job is pending or holds the writer lock.
+
+Session-start reconciliation runs after successful fleet-lock acquisition.
+It retires a verified surviving agent process group before replacement, restarts a nonterminal worker from frozen evidence, reuses a settled combined result, never replays a started-but-unsettled combined agent or legacy two-pass agent, or finalizes a completion that was published just before interruption.
+A process group whose ownership cannot be proved blocks replacement instead of being signalled or overlapped.
+A missing or failed Retrospective preserves completed local Stow writes but leaves the combined receipt incomplete and not reset-safe.
+Settled terminal evidence is pruned after 14 days; running, recoverable, and unresolved staged evidence is retained.
+There is no explicit cancellation feature or active-work time-to-live, so an explicit Stow retains exclusion until its pass completes or its owning session ends.
+The transcript snapshot is private, unstable-format, untrusted evidence rather than instruction authority.
+Existing automatic Supermemory hooks are independent and unchanged.
+
+Project hook changes apply to new harness sessions. A session that already loaded its hook registry may require a restart before the new `PreCompact` registration is active.
 
 ## Secondmate routes (data/secondmates.md)
 
