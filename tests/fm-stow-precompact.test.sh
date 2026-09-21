@@ -814,15 +814,6 @@ kill_held_hook() { # <hold>
   rm -f -- "$hold"
 }
 
-expire_session_lock() { # <home>
-  local home=$1 dead_pid
-  sleep 30 &
-  dead_pid=$!
-  kill "$dead_pid" 2>/dev/null || true
-  wait "$dead_pid" 2>/dev/null || true
-  printf '%s\n' "$dead_pid" > "$home/state/.lock"
-}
-
 test_ambiguous_agent_group_leaves_a_boundary_restartable() {
   local record home fakebin input job_a job_b sleeper sleeper_pgid dead_pid
 
@@ -890,12 +881,22 @@ EOF
   : > "$hold"
   run_hook "$home" "$fakebin" "$input" codex FM_TEST_SNAPSHOT_HOLD="$hold" >/dev/null 2>&1 &
   wait_for_file "$hold.ready" || fail "capture never entered the open-work snapshot"
+  attempt=$(find "$attempts" -mindepth 1 -maxdepth 1 -type d | head -1)
+  [ -n "$attempt" ] || fail "the active capture left no attempt"
+  cp "$attempt/receipt.json" "$home/active-receipt.json"
+  run_reconcile "$home" "$fakebin" || fail "active capture reconciliation failed"
+  cmp -s "$home/active-receipt.json" "$attempt/receipt.json" \
+    || fail "reconciliation changed a genuinely active capture receipt"
+  [ -z "$(job_dir "$home")" ] || fail "an active capture was promoted"
+  [ ! -s "$home/agent.log" ] || fail "an active capture started model work"
   kill_held_hook "$hold" || fail "the held capture hook could not be stopped"
   attempt=$(find "$attempts" -mindepth 1 -maxdepth 1 -type d | head -1)
   [ -n "$attempt" ] || fail "the stopped capture left no attempt"
   jq -e '.state == "hook_fired"' "$attempt/receipt.json" >/dev/null \
     || fail "the stopped capture was not left mid-capture"
-  expire_session_lock "$home"
+  if [ "$(cat "$home/state/.lock")" != "$$" ] || ! kill -0 "$$"; then
+    fail "the original capture session did not remain alive"
+  fi
   run_reconcile "$home" "$fakebin" || fail "attempt reconciliation failed"
   jq -e '
     .state == "failed" and .reset_safe == false
@@ -925,7 +926,9 @@ EOF
     "$attempt/receipt.json" >/dev/null \
     || fail "the unpromoted capture did not freeze a complete boundary"
   [ -z "$(job_dir "$home")" ] || fail "the capture was promoted before reconciliation"
-  expire_session_lock "$home"
+  if [ "$(cat "$home/state/.lock")" != "$$" ] || ! kill -0 "$$"; then
+    fail "the original capture session did not remain alive"
+  fi
   run_reconcile "$home" "$fakebin" || fail "unpromoted attempt reconciliation failed"
   [ ! -d "$attempt" ] || fail "a complete capture attempt was not promoted"
   job=$(job_dir "$home")
@@ -936,7 +939,10 @@ EOF
     || fail "the recovered boundary did not complete normally"
   [ "$(wc -l < "$home/agent.log" | tr -d ' ')" = 1 ] \
     || fail "the recovered boundary did not run exactly one combined agent"
-  pass "stopped capture attempts are promoted or explicitly settled"
+  run_reconcile "$home" "$fakebin" || fail "repeated capture reconciliation failed"
+  [ "$(wc -l < "$home/agent.log" | tr -d ' ')" = 1 ] \
+    || fail "repeated capture reconciliation replayed model work"
+  pass "live-session recovery preserves active captures and settles stopped captures"
 }
 
 test_combined_agent_is_not_replayed() {

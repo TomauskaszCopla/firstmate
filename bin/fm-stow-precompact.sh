@@ -160,10 +160,10 @@ receipt_session_live() { # <receipt-dir>
   [ -n "$expected_identity" ] && [ "$current_identity" = "$expected_identity" ]
 }
 
-worker_alive() { # <job-dir>
-  local job=$1 pid expected actual
-  pid=$(jq -r '.worker.pid // empty' "$job/receipt.json" 2>/dev/null || true)
-  expected=$(jq -r '.worker.identity // empty' "$job/receipt.json" 2>/dev/null || true)
+receipt_process_alive() {
+  local job=$1 owner=$2 pid expected actual
+  pid=$(jq -r --arg owner "$owner" '.[$owner].pid // empty' "$job/receipt.json" 2>/dev/null || true)
+  expected=$(jq -r --arg owner "$owner" '.[$owner].identity // empty' "$job/receipt.json" 2>/dev/null || true)
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
   [ -n "$expected" ] || return 1
   fm_pid_alive "$pid" || return 1
@@ -252,7 +252,7 @@ prune_settled_jobs() {
     finished_epoch=$(fm_utc_iso_to_epoch "$finished" 2>/dev/null || true)
     case "$finished_epoch" in ''|*[!0-9]*) continue ;; esac
     [ "$finished_epoch" -le "$cutoff" ] || continue
-    if worker_alive "$job" || agent_tree_alive "$job"; then
+    if receipt_process_alive "$job" worker || agent_tree_alive "$job"; then
       continue
     fi
     rm -rf -- "$job" || rc=1
@@ -374,7 +374,7 @@ launch_job() { # <job-dir>
     complete) fm_lock_release "$PUBLISH_LOCK"; return 0 ;;
     incomplete|failed) fm_lock_release "$PUBLISH_LOCK"; return 3 ;;
     worker_started|running)
-      if worker_alive "$job"; then
+      if receipt_process_alive "$job" worker; then
         fm_lock_release "$PUBLISH_LOCK"
         return 0
       fi
@@ -448,7 +448,7 @@ launch_job() { # <job-dir>
 capture_hook() {
   local payload=$1 event trigger harness session_id cwd transcript transcript_bytes transcript_sha snapshot_sha
   local attempt_id attempt_dir captured_at job_seed job_sha job_id job receipt state rc=0
-  local session_lock_pid session_lock_identity
+  local session_lock_pid session_lock_identity capture_identity
 
   command -v jq >/dev/null 2>&1 || hook_refusal 'jq is required'
   printf '%s' "$payload" | jq -e 'type == "object"' >/dev/null 2>&1 \
@@ -480,6 +480,8 @@ capture_hook() {
   case "$session_lock_pid" in ''|*[!0-9]*) hook_refusal 'the owning session lock is unreadable' ;; esac
   session_lock_identity=$(fm_pid_identity "$session_lock_pid" 2>/dev/null || true)
   [ -n "$session_lock_identity" ] || hook_refusal 'the owning session identity cannot be captured'
+  capture_identity=$(fm_pid_identity "$$" 2>/dev/null || true)
+  [ -n "$capture_identity" ] || hook_refusal 'the capture process identity cannot be recorded'
   [ ! -L "$RUNS" ] || hook_refusal 'the private Stow run path is a symlink'
   mkdir -p "$RUNS/attempts" || hook_refusal 'the private Stow run directory cannot be created'
   [ -d "$RUNS" ] && [ ! -L "$RUNS/attempts" ] && [ -d "$RUNS/attempts" ] \
@@ -491,11 +493,13 @@ capture_hook() {
   captured_at=$(now_iso)
   jq -n --arg attempt "$attempt_id" --arg at "$captured_at" \
     --arg session "$session_id" --arg trigger "$trigger" --arg harness "$harness" --arg cwd "$cwd" \
+    --argjson capture_pid "$$" --arg capture_identity "$capture_identity" \
     --argjson session_lock_pid "$session_lock_pid" \
     --arg session_lock_identity "$session_lock_identity" '
       {schema:"fm-stow-precompact-receipt.v1",attempt_id:$attempt,job_id:null,
        session_id:$session,trigger:$trigger,harness:$harness,cwd:$cwd,state:"hook_fired",
        session_lock_pid:$session_lock_pid,session_lock_identity:$session_lock_identity,
+       capture:{pid:$capture_pid,identity:$capture_identity},
        reset_safe:false,launch_attempts:0,stages:{hook_fired:$at}}
     ' | atomic_write "$attempt_dir/receipt.json" \
     || hook_refusal 'the hook-fired receipt could not be published' "$attempt_dir/receipt.json"
@@ -569,7 +573,7 @@ capture_hook() {
       hook_refusal "the exact captured boundary already has terminal state '$state'" "$receipt"
       ;;
     worker_started|running)
-      worker_alive "$job" && return 0
+      receipt_process_alive "$job" worker && return 0
       ;;
   esac
   launch_job "$job" || {
@@ -871,7 +875,7 @@ foreign_agent_conflict() { # <own-job-dir>
     other=${receipt%/receipt.json}
     [ "$other" != "$own" ] || continue
     agent_tree_alive "$other" || continue
-    worker_alive "$other" && return 0
+    receipt_process_alive "$other" worker && return 0
     retire_agent_tree "$other" || return 0
     receipt_update "$other" '.active_agent=null' || return 0
   done
@@ -1120,7 +1124,7 @@ reconcile_attempts() {
     [ -f "$receipt" ] && [ ! -L "$receipt" ] || continue
     attempt=${receipt%/receipt.json}
     [ -d "$attempt" ] && [ ! -L "$attempt" ] || continue
-    receipt_session_live "$attempt" && continue
+    receipt_process_alive "$attempt" capture && continue
     state=$(jq -r '.state // empty' "$receipt" 2>/dev/null || true)
     case "$state" in complete|incomplete|failed) continue ;; esac
     job_id=$(jq -r '.job_id // empty' "$receipt" 2>/dev/null || true)
@@ -1175,7 +1179,7 @@ reconcile_jobs() {
           --arg finished "$(now_iso)" || true
       continue
     fi
-    worker_alive "$job" && continue
+    receipt_process_alive "$job" worker && continue
     if agent_group_alive "$job"; then
       if ! retire_agent_tree "$job"; then
         receipt_update "$job" '
