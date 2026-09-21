@@ -1,0 +1,57 @@
+{
+  "schema": "fm-stow-precompact-receipt.v1",
+  "attempt_id": "1790009703.65408.17790",
+  "job_id": "ed5486e22e1479d01dae6d0f19313006",
+  "session_id": "01a0c4e4-5b0c-7472-a0e5-998ae2ac05a5",
+  "trigger": "manual",
+  "harness": "codex",
+  "cwd": "/Users/tb/.no-mistakes/worktrees/13e47def527a/01M32DWWKP0HVX8V5KS7YP0YW5/.stow-test-tmp/fm-stow-precompact-live-e2e.59539/manual",
+  "state": "complete",
+  "session_lock_pid": 59539,
+  "session_lock_identity": "Mon Sep 21 19:54:53 2026     bash tests/.stow-live-evidence.sh",
+  "capture": {
+    "pid": 65408,
+    "identity": "Mon Sep 21 19:55:03 2026     bash /Users/tb/.no-mistakes/worktrees/13e47def527a/01M32DWWKP0HVX8V5KS7YP0YW5/.stow-test-tmp/fm-stow-precompact-live-e2e.59539/manual/bin/fm-stow-precompact.sh hook"
+  },
+  "reset_safe": true,
+  "launch_attempts": 1,
+  "stages": {
+    "hook_fired": "2026-09-21T16:55:03Z",
+    "snapshot_captured": "2026-09-21T16:55:03Z",
+    "launching": "2026-09-21T16:55:03Z",
+    "worker_started": "2026-09-21T16:55:03Z",
+    "writer_lock_acquired": "2026-09-21T16:55:04Z",
+    "stow_skill_resolved": "2026-09-21T16:55:04Z",
+    "agent_started": "2026-09-21T16:55:04Z",
+    "agent_finished": "2026-09-21T16:55:05Z",
+    "retrospective_skill_verified": "2026-09-21T16:55:05Z",
+    "completion_published": "2026-09-21T16:55:05Z"
+  },
+  "snapshot": {
+    "transcript_path": "/Users/tb/.no-mistakes/worktrees/13e47def527a/01M32DWWKP0HVX8V5KS7YP0YW5/.stow-test-tmp/fm-stow-precompact-live-e2e.59539/manual/codex-home/sessions/2026/09/21/rollout-2026-09-21T19-54-55-01a0c4e4-5b0c-7472-a0e5-998ae2ac05a5.jsonl",
+    "transcript_bytes": 71431,
+    "transcript_sha256": "543351e7757becfd9d0e1485280beb7f3e665704316b406483bbbe7be80081ab",
+    "open_work_sha256": "76dda6e23e693d7997bd53ac92f80f763fb6b6b84572bb04b063bfb9385ba460"
+  },
+  "worker": {
+    "pid": 65977,
+    "identity": "Mon Sep 21 19:55:03 2026     bash /Users/tb/.no-mistakes/worktrees/13e47def527a/01M32DWWKP0HVX8V5KS7YP0YW5/.stow-test-tmp/fm-stow-precompact-live-e2e.59539/manual/bin/fm-stow-precompact.sh run --job ed5486e22e1479d01dae6d0f19313006 --attempt 1790009703.65408.26391",
+    "attempt": "1790009703.65408.26391",
+    "started": "2026-09-21T16:55:03Z"
+  },
+  "active_agent": null,
+  "skills": {
+    "stow": {
+      "entrypoint": "/Users/tb/.no-mistakes/worktrees/13e47def527a/01M32DWWKP0HVX8V5KS7YP0YW5/.stow-test-tmp/fm-stow-precompact-live-e2e.59539/manual/.agents/skills/stow/SKILL.md",
+      "sha256": "5ae517ffdb1b8902ab696d49e7bc043266745a1a4a6215e698f60f11a43ef37d"
+    },
+    "retrospective": {
+      "entrypoint": "/Users/tb/.no-mistakes/worktrees/13e47def527a/01M32DWWKP0HVX8V5KS7YP0YW5/.stow-test-tmp/fm-stow-precompact-live-e2e.59539/manual/codex-home/plugins/cache/ai-team-skills/ai-team-tomas-skills/1.0.0/skills/retrospective/SKILL.md",
+      "sha256": "a427536c51eec8d5bd62c2bfc1eb0bea66c76c1c0b6e0a4e18bc1bc6e4c12d26"
+    }
+  },
+  "agent_rc": 0,
+  "finished": "2026-09-21T16:55:05Z",
+  "stow_status": "complete",
+  "retrospective_status": "no-change"
+}

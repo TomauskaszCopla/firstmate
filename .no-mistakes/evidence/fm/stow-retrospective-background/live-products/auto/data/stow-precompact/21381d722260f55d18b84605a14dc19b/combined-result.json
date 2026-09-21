@@ -1,0 +1,40 @@
+{
+  "stow": {
+    "status": "complete",
+    "reset_safe": true,
+    "summary": "stowed",
+    "effective_budget_tokens": 7500,
+    "total_estimated_tokens_before": 3,
+    "total_estimated_tokens_after": 3,
+    "memory_actions": [
+      {
+        "path": "data/captain.md",
+        "action": "unchanged",
+        "detail": "within budget"
+      },
+      {
+        "path": "data/captain-shared.md",
+        "action": "unchanged",
+        "detail": "within budget"
+      },
+      {
+        "path": "data/learnings.md",
+        "action": "unchanged",
+        "detail": "within budget"
+      }
+    ],
+    "durable_findings": [],
+    "open_work": [],
+    "exceptions": []
+  },
+  "retrospective": {
+    "entrypoint": "/Users/tb/.no-mistakes/worktrees/13e47def527a/01M32DWWKP0HVX8V5KS7YP0YW5/.stow-test-tmp/fm-stow-precompact-live-e2e.59539/auto/codex-home/plugins/cache/ai-team-skills/ai-team-tomas-skills/1.0.0/skills/retrospective/SKILL.md",
+    "status": "no-change",
+    "summary": "no change",
+    "proof": [
+      "stow",
+      "retrospective"
+    ],
+    "exceptions": []
+  }
+}

@@ -1,0 +1,25 @@
+ok - manual and automatic boundaries capture, run in order, and deduplicate
+ok - each hook runs one provider-matched agent with no fallback
+ok - detached providers honor launch policies and receive explicit authority instructions
+ok - empty Stow and Retrospective evidence cannot certify reset safety
+ok - post-pass totals must not exceed the effective memory budget
+ok - worker failure stays incomplete and still runs Retrospective
+ok - provider preflight blocks missing Retrospective and a failed pass refuses reset safety
+ok - running duplicates stay single-flight and restart retires uncertain work without replay
+ok - an orphaned agent group cannot overlap a second boundary's agent
+ok - an interruption before agent ownership remains restartable
+ok - manual Stow serializes the writer and non-primary sessions stand down
+ok - snapshot failure blocks compaction with durable Codex and Claude receipts
+ok - session-start reconciliation clears stale manual Stow reservations
+ok - secondmates serialize explicit Stow while automatic hooks remain primary-only
+ok - live-state guard rejects a dead original session owner
+ok - an unprovable foreign agent group defers a boundary instead of failing it
+ok - live-session recovery preserves active captures and settles stopped captures
+ok - reconciliation never replays an interrupted or settled combined agent
+ok - unresolved Stow and Retrospective exceptions prevent reset safety
+ok - session reconciliation recovers a snapshot-captured job
+ok - a failed JSON producer cannot replace a valid receipt
+ok - retention prunes only settled evidence after 14 days
+ok - the real session-lock predicate gates automatic Stow ownership
+ok - Codex and Claude register one compaction hook and one ordinary SessionStart hook
+all pre-compaction Stow tests passed

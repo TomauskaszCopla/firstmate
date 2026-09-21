@@ -1,0 +1,61 @@
+{
+  "schema": "fm-stow-precompact-completion.v1",
+  "job_id": "16cf9b6274b4fa9643768d55f05d2a71",
+  "state": "complete",
+  "reset_safe": true,
+  "finished": "2026-09-21T17:02:09Z",
+  "sequence": [
+    "stow_local",
+    "retrospective"
+  ],
+  "agent": {
+    "harness": "codex",
+    "process_rc": 0
+  },
+  "stow": {
+    "result": {
+      "status": "complete",
+      "reset_safe": true,
+      "summary": "Local primary-home Stow completed. No durable findings or open work required persistence; nothing this session knew has been lost. All startup-memory files remain absent and the home remains within budget.",
+      "effective_budget_tokens": 7500,
+      "total_estimated_tokens_before": 0,
+      "total_estimated_tokens_after": 0,
+      "memory_actions": [
+        {
+          "path": "data/captain.md",
+          "action": "unchanged",
+          "detail": "File absent; no captain preference warranted creating it."
+        },
+        {
+          "path": "data/captain-shared.md",
+          "action": "unchanged",
+          "detail": "File absent; no shared captain preference warranted creating it."
+        },
+        {
+          "path": "data/learnings.md",
+          "action": "unchanged",
+          "detail": "File absent; no operational learning warranted creating it."
+        }
+      ],
+      "durable_findings": [],
+      "open_work": [],
+      "exceptions": []
+    }
+  },
+  "retrospective": {
+    "result": {
+      "entrypoint": "/Users/tb/.no-mistakes/worktrees/13e47def527a/01M32DWWKP0HVX8V5KS7YP0YW5/.stow-test-tmp/fm-stow-precompact-live-e2e.59539/real-worker/codex-home/plugins/cache/ai-team-skills/ai-team-tomas-skills/1.0.0/skills/retrospective/SKILL.md",
+      "status": "no-change",
+      "summary": "The session contained no durable project or personal knowledge to reconcile, so no Supermemory mutation was warranted.",
+      "proof": [
+        "Verified the configured API base is http://127.0.0.1:6767, credentials contain a non-empty API key, and the listener is loopback-only at 127.0.0.1:6767.",
+        "Fetched and read the live /v4/openapi contract successfully.",
+        "Resolved the canonical repository container as repo_01m32dwwkp0hvx8v5ks7yp0yw5__5673a7f24437ff8b using the installed resolver.",
+        "Fresh reads showed zero memory entries and an empty static/dynamic profile in the canonical repository container."
+      ],
+      "exceptions": []
+    },
+    "entrypoint": "/Users/tb/.no-mistakes/worktrees/13e47def527a/01M32DWWKP0HVX8V5KS7YP0YW5/.stow-test-tmp/fm-stow-precompact-live-e2e.59539/real-worker/codex-home/plugins/cache/ai-team-skills/ai-team-tomas-skills/1.0.0/skills/retrospective/SKILL.md",
+    "sha256": "a427536c51eec8d5bd62c2bfc1eb0bea66c76c1c0b6e0a4e18bc1bc6e4c12d26"
+  }
+}

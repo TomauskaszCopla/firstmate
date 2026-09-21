@@ -1,0 +1,59 @@
+{
+  "schema": "fm-stow-precompact-completion.v1",
+  "job_id": "21381d722260f55d18b84605a14dc19b",
+  "state": "complete",
+  "reset_safe": true,
+  "finished": "2026-09-21T16:55:29Z",
+  "sequence": [
+    "stow_local",
+    "retrospective"
+  ],
+  "agent": {
+    "harness": "codex",
+    "process_rc": 0
+  },
+  "stow": {
+    "result": {
+      "status": "complete",
+      "reset_safe": true,
+      "summary": "stowed",
+      "effective_budget_tokens": 7500,
+      "total_estimated_tokens_before": 3,
+      "total_estimated_tokens_after": 3,
+      "memory_actions": [
+        {
+          "path": "data/captain.md",
+          "action": "unchanged",
+          "detail": "within budget"
+        },
+        {
+          "path": "data/captain-shared.md",
+          "action": "unchanged",
+          "detail": "within budget"
+        },
+        {
+          "path": "data/learnings.md",
+          "action": "unchanged",
+          "detail": "within budget"
+        }
+      ],
+      "durable_findings": [],
+      "open_work": [],
+      "exceptions": []
+    }
+  },
+  "retrospective": {
+    "result": {
+      "entrypoint": "/Users/tb/.no-mistakes/worktrees/13e47def527a/01M32DWWKP0HVX8V5KS7YP0YW5/.stow-test-tmp/fm-stow-precompact-live-e2e.59539/auto/codex-home/plugins/cache/ai-team-skills/ai-team-tomas-skills/1.0.0/skills/retrospective/SKILL.md",
+      "status": "no-change",
+      "summary": "no change",
+      "proof": [
+        "stow",
+        "retrospective"
+      ],
+      "exceptions": []
+    },
+    "entrypoint": "/Users/tb/.no-mistakes/worktrees/13e47def527a/01M32DWWKP0HVX8V5KS7YP0YW5/.stow-test-tmp/fm-stow-precompact-live-e2e.59539/auto/codex-home/plugins/cache/ai-team-skills/ai-team-tomas-skills/1.0.0/skills/retrospective/SKILL.md",
+    "sha256": "a427536c51eec8d5bd62c2bfc1eb0bea66c76c1c0b6e0a4e18bc1bc6e4c12d26"
+  }
+}

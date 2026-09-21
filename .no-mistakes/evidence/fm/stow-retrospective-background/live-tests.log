@@ -1,0 +1,5 @@
+ok - codex-cli 0.155.1 manual /compact freezes the boundary before returning and its detached worker survives parent exit
+ok - codex-cli 0.155.1 automatic compaction fires trigger=auto and its detached worker survives parent exit
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/Users/tb/.no-mistakes/worktrees/13e47def527a/01M32DWWKP0HVX8V5KS7YP0YW5/.stow-test-tmp" (codex_home: AbsolutePathBuf("/Users/tb/.no-mistakes/worktrees/13e47def527a/01M32DWWKP0HVX8V5KS7YP0YW5/.stow-test-tmp/fm-stow-precompact-live-e2e.59539/real-worker/codex-home"))
+ok - codex-cli 0.155.1 isolated real worker completed Stow then the current installed Retrospective without production-memory changes
+all real Codex pre-compaction Stow assertions passed
