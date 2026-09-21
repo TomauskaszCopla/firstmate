@@ -330,18 +330,25 @@ manual_reservation() { # <begin|end>
   fm_lock_release "$PUBLISH_LOCK"
 }
 
-job_failure() { # <job-dir> <reason>
+job_failure_locked() { # <job-dir> <reason>
   local job=$1 reason=$2 finished
   finished=$(now_iso)
-  receipt_update "$job" \
+  receipt_update_locked "$job" \
     '.state="failed" | .reset_safe=false | .finished=$finished | .error=$reason
      | .stages.failed=$finished' \
     --arg finished "$finished" --arg reason "$reason" || true
 }
 
+job_failure() { # <job-dir> <reason>
+  load_runtime_libs || return 1
+  fm_lock_acquire_wait "$PUBLISH_LOCK"
+  job_failure_locked "$@"
+  fm_lock_release "$PUBLISH_LOCK"
+}
+
 launch_job() { # <job-dir>
   local job=$1 job_id state attempt monitor_was_on=0 pid ready_pid ready_identity actual_identity
-  local ready=$job/worker-ready.json i=0 started job_failure_locked_reason
+  local ready=$job/worker-ready.json i=0 started
   job_id=${job##*/}
   case "$job_id" in
     *[!0-9a-f]*|'') return 1 ;;
@@ -404,11 +411,7 @@ launch_job() { # <job-dir>
   if [ "${ready_pid:-}" != "$pid" ] || [ -z "${ready_identity:-}" ] \
     || [ "${actual_identity:-}" != "$ready_identity" ]; then
     kill "$pid" 2>/dev/null || true
-    job_failure_locked_reason="the detached worker did not publish a verified start handshake"
-    receipt_update_locked "$job" '
-      .state="failed" | .reset_safe=false | .finished=$finished | .error=$reason
-      | .stages.failed=$finished
-    ' --arg finished "$(now_iso)" --arg reason "$job_failure_locked_reason" || true
+    job_failure_locked "$job" 'the detached worker did not publish a verified start handshake'
     fm_lock_release "$PUBLISH_LOCK"
     [ "$monitor_was_on" -eq 1 ] || set +m 2>/dev/null || true
     return 1
@@ -816,7 +819,6 @@ combined_result_agent_valid() { # <result>
     and (.stow.reset_safe | type == "boolean")
     and ([.stow.effective_budget_tokens, .stow.total_estimated_tokens_before,
           .stow.total_estimated_tokens_after] | all(type == "number" and floor == . and . >= 0))
-    and (.stow.total_estimated_tokens_after <= .stow.effective_budget_tokens)
     and (.stow.memory_actions | type == "array")
     and (all(.stow.memory_actions[];
       (.path == "data/captain.md" or .path == "data/captain-shared.md" or .path == "data/learnings.md")
@@ -837,17 +839,31 @@ combined_result_agent_valid() { # <result>
   ' "$1" >/dev/null 2>&1
 }
 
-write_failed_combined_result() { # <result> <rc>
-  jq -n --argjson rc "$2" '
-    {stow:{status:"failed",reset_safe:false,
-           summary:("The combined Stow and Retrospective agent failed with rc="+($rc|tostring)+"."),
+write_failed_combined_result() { # <result> <stow-summary> <stow-exception> <retrospective-summary> <retrospective-exception>
+  jq -n --arg stow_summary "$2" --arg stow_exception "$3" \
+    --arg retrospective_summary "$4" --arg retrospective_exception "$5" '
+    {stow:{status:"failed",reset_safe:false,summary:$stow_summary,
            effective_budget_tokens:null,total_estimated_tokens_before:null,total_estimated_tokens_after:null,
            memory_actions:[],durable_findings:[],open_work:[],
-           exceptions:["No valid combined structured result was produced."]},
-     retrospective:{entrypoint:"",status:"failed",
-                    summary:"The combined agent did not publish a valid Retrospective outcome.",
-                    proof:[],exceptions:["Retrospective completion is uncertain."]}}
+           exceptions:[$stow_exception]},
+     retrospective:{entrypoint:"",status:"failed",summary:$retrospective_summary,
+                    proof:[],exceptions:[$retrospective_exception]}}
   ' | atomic_write "$1"
+}
+
+foreign_agent_conflict() { # <own-job-dir>
+  local own=$1 other receipt
+  [ -d "$RUNS" ] || return 1
+  for receipt in "$RUNS"/*/receipt.json; do
+    [ -f "$receipt" ] || continue
+    other=${receipt%/receipt.json}
+    [ "$other" != "$own" ] || continue
+    agent_tree_alive "$other" || continue
+    worker_alive "$other" && return 0
+    retire_agent_tree "$other" || return 0
+    receipt_update "$other" '.active_agent=null' || return 0
+  done
+  return 1
 }
 
 run_worker() { # <job-id> <attempt>
@@ -891,6 +907,10 @@ run_worker() { # <job-id> <attempt>
   trap 'exit 143' INT TERM
   receipt_update "$job" '.state="running" | .stages.writer_lock_acquired=$at' \
     --arg at "$(now_iso)" || exit 1
+  if foreign_agent_conflict "$job"; then
+    job_failure "$job" 'another detached Stow agent is still writing this home'
+    exit 1
+  fi
 
   transcript_bytes=$(jq -r '.snapshot.transcript_bytes // empty' "$receipt")
   expected=$(jq -r '.snapshot.transcript_sha256 // empty' "$receipt")
@@ -930,35 +950,29 @@ run_worker() { # <job-id> <attempt>
     [ ! -f "$job/combined-result.json" ] \
       || cp -p -- "$job/combined-result.json" "$job/combined-result.invalid.json" 2>/dev/null \
       || exit 1
-    write_failed_combined_result "$job/combined-result.json" "$agent_rc" || exit 1
+    write_failed_combined_result "$job/combined-result.json" \
+      "The combined Stow and Retrospective agent failed with rc=$agent_rc." \
+      "No valid combined structured result was produced." \
+      "The combined agent did not publish a valid Retrospective outcome." \
+      "Retrospective completion is uncertain." || exit 1
   elif [ -n "$agent_started" ] || [ -n "$agent_finished" ] || [ "$legacy_started" -eq 1 ]; then
     [ ! -f "$job/combined-result.json" ] \
       || cp -p -- "$job/combined-result.json" "$job/combined-result.unsettled.json" 2>/dev/null \
       || exit 1
     agent_rc=null
-    jq -n '
-      {stow:{status:"failed",reset_safe:false,
-             summary:"The prior combined Stow and Retrospective agent started but did not publish a settled result.",
-             effective_budget_tokens:null,total_estimated_tokens_before:null,total_estimated_tokens_after:null,
-             memory_actions:[],durable_findings:[],open_work:[],
-             exceptions:["The interrupted combined pass was not replayed because its side effects are uncertain."]},
-       retrospective:{entrypoint:"",status:"failed",
-                      summary:"The prior combined agent did not publish a settled Retrospective outcome.",
-                      proof:[],exceptions:["Retrospective completion is uncertain."]}}
-    ' | atomic_write "$job/combined-result.json" || exit 1
+    write_failed_combined_result "$job/combined-result.json" \
+      "The prior combined Stow and Retrospective agent started but did not publish a settled result." \
+      "The interrupted combined pass was not replayed because its side effects are uncertain." \
+      "The prior combined agent did not publish a settled Retrospective outcome." \
+      "Retrospective completion is uncertain." || exit 1
     receipt_update "$job" '.agent_rc=null | .stages.agent_uncertain=$at' \
       --arg at "$(now_iso)" || exit 1
   elif ! preflight_harness "$harness"; then
-    jq -n --arg harness "$harness" '
-      {stow:{status:"failed",reset_safe:false,
-             summary:("The invoking "+$harness+" provider could not be preflighted before the combined pass."),
-             effective_budget_tokens:null,total_estimated_tokens_before:null,total_estimated_tokens_after:null,
-             memory_actions:[],durable_findings:[],open_work:[],
-             exceptions:["No combined agent was launched."]},
-       retrospective:{entrypoint:"",status:"failed",
-                      summary:"The installed provider-matched Retrospective entrypoint was unavailable.",
-                      proof:[],exceptions:["Retrospective was not run."]}}
-    ' | atomic_write "$job/combined-result.json" || exit 1
+    write_failed_combined_result "$job/combined-result.json" \
+      "The invoking $harness provider could not be preflighted before the combined pass." \
+      "No combined agent was launched." \
+      "The installed provider-matched Retrospective entrypoint was unavailable." \
+      "Retrospective was not run." || exit 1
     receipt_update "$job" '.agent_rc=null | .stages.agent_preflight_failed=$at' \
       --arg at "$(now_iso)" || exit 1
   else
@@ -981,7 +995,11 @@ run_worker() { # <job-id> <attempt>
       [ ! -f "$job/combined-result.json" ] \
         || mv -f -- "$job/combined-result.json" "$job/combined-result.invalid.json" \
         || exit 1
-      write_failed_combined_result "$job/combined-result.json" "$agent_rc" || exit 1
+      write_failed_combined_result "$job/combined-result.json" \
+        "The combined Stow and Retrospective agent failed with rc=$agent_rc." \
+        "No valid combined structured result was produced." \
+        "The combined agent did not publish a valid Retrospective outcome." \
+        "Retrospective completion is uncertain." || exit 1
     fi
   fi
   retrospective_status=$(jq -r '.retrospective.status' "$job/combined-result.json")
@@ -994,16 +1012,11 @@ run_worker() { # <job-id> <attempt>
     if [ -z "$retrospective_sha" ]; then
       if [ "$retrospective_status" != failed ]; then
         cp -p -- "$job/combined-result.json" "$job/combined-result.invalid.json" || exit 1
-        jq -n '
-          {stow:{status:"failed",reset_safe:false,
-                 summary:"The combined result named an unverified Retrospective entrypoint.",
-                 effective_budget_tokens:null,total_estimated_tokens_before:null,total_estimated_tokens_after:null,
-                 memory_actions:[],durable_findings:[],open_work:[],
-                 exceptions:["Reset safety cannot be established from an unverified skill path."]},
-           retrospective:{entrypoint:"",status:"failed",
-                          summary:"The successful Retrospective result did not name the current provider-matched entrypoint.",
-                          proof:[],exceptions:["The Retrospective result was rejected."]}}
-        ' | atomic_write "$job/combined-result.json" || exit 1
+        write_failed_combined_result "$job/combined-result.json" \
+          "The combined result named an unverified Retrospective entrypoint." \
+          "Reset safety cannot be established from an unverified skill path." \
+          "The successful Retrospective result did not name the current provider-matched entrypoint." \
+          "The Retrospective result was rejected." || exit 1
       fi
     else
       receipt_update "$job" '
@@ -1014,16 +1027,11 @@ run_worker() { # <job-id> <attempt>
     fi
   elif [ "$retrospective_status" != failed ]; then
     cp -p -- "$job/combined-result.json" "$job/combined-result.invalid.json" || exit 1
-    jq -n '
-      {stow:{status:"failed",reset_safe:false,
-             summary:"The combined result omitted the successful Retrospective entrypoint.",
-             effective_budget_tokens:null,total_estimated_tokens_before:null,total_estimated_tokens_after:null,
-             memory_actions:[],durable_findings:[],open_work:[],
-             exceptions:["Reset safety cannot be established without the verified skill path."]},
-       retrospective:{entrypoint:"",status:"failed",
-                      summary:"The successful Retrospective result omitted its entrypoint.",
-                      proof:[],exceptions:["The Retrospective result was rejected."]}}
-    ' | atomic_write "$job/combined-result.json" || exit 1
+    write_failed_combined_result "$job/combined-result.json" \
+      "The combined result omitted the successful Retrospective entrypoint." \
+      "Reset safety cannot be established without the verified skill path." \
+      "The successful Retrospective result omitted its entrypoint." \
+      "The Retrospective result was rejected." || exit 1
   fi
 
   retrospective_status=$(jq -r '.retrospective.status' "$job/combined-result.json")
@@ -1038,7 +1046,8 @@ run_worker() { # <job-id> <attempt>
   combined=incomplete
   if [ "$stow_status" = complete ] && [ "$reset_safe" = true ] \
     && { [ "$retrospective_status" = complete ] || [ "$retrospective_status" = no-change ]; } \
-    && jq -e '.stow.exceptions == [] and .retrospective.exceptions == []' \
+    && jq -e '.stow.exceptions == [] and .retrospective.exceptions == []
+      and (.stow.total_estimated_tokens_after <= .stow.effective_budget_tokens)' \
       "$job/combined-result.json" >/dev/null; then
     combined=complete
   else

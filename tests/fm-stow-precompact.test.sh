@@ -458,6 +458,46 @@ EOF
   pass "running duplicates stay single-flight and restart retires uncertain work without replay"
 }
 
+test_orphaned_agent_blocks_a_second_boundary() {
+  local record home fakebin input hold job_a job_b pid_a pgid_a overlap i=0
+  record=$(make_home cross-job)
+  IFS=$'\t' read -r home fakebin <<EOF
+$record
+EOF
+  printf '%s\n' '{"a":1}' > "$home/transcript-a.jsonl"
+  printf '%s\n' '{"b":2}' > "$home/transcript-b.jsonl"
+  hold=$home/hold
+  : > "$hold"
+  input=$(payload "$home" "$home/transcript-a.jsonl" manual)
+  run_hook "$home" "$fakebin" "$input" codex FM_TEST_AGENT_HOLD="$hold" >/dev/null \
+    || fail "the first boundary did not start"
+  wait_for_file "$hold.ready" || fail "the first agent never started"
+  job_a=$(job_dir "$home")
+  pid_a=$(jq -r '.worker.pid' "$job_a/receipt.json")
+  pgid_a=$(jq -r '.active_agent.pgid' "$job_a/receipt.json")
+  overlap=$home/agent-overlap
+
+  input=$(payload "$home" "$home/transcript-b.jsonl" manual)
+  run_hook "$home" "$fakebin" "$input" codex \
+    FM_TEST_OLD_AGENT_PGID="$pgid_a" FM_TEST_AGENT_OVERLAP="$overlap" >/dev/null \
+    || fail "the second boundary did not start"
+  job_b=$(find "$home/data/stow-precompact" -mindepth 1 -maxdepth 1 -type d \
+    ! -name attempts ! -path "$job_a" | head -1)
+  [ -n "$job_b" ] && [ "$job_b" != "$job_a" ] || fail "the second boundary reused the first job"
+
+  kill -9 "$pid_a" 2>/dev/null || fail "could not interrupt the first worker"
+  while kill -0 "$pid_a" 2>/dev/null && [ "$i" -lt 100 ]; do sleep 0.05; i=$((i + 1)); done
+
+  wait_for_file "$job_b/completion.json" 400 \
+    || fail "the second boundary never settled after the first worker died"
+  [ ! -e "$overlap" ] \
+    || fail "the second agent ran while the orphaned first agent group was alive"
+  kill -0 -- "-$pgid_a" 2>/dev/null \
+    && fail "the orphaned first agent group survived the second boundary"
+  rm -f -- "$hold"
+  pass "an orphaned agent group cannot overlap a second boundary's agent"
+}
+
 test_pre_agent_interruption_remains_restartable() {
   local record home fakebin transcript input hold job pid agent_pid real_ps launches i=0
   record=$(make_home pre-agent-restart)
@@ -1074,6 +1114,7 @@ test_budget_bound_controls_reset_safety
 test_failures_are_terminal_and_retrospective_still_runs
 test_missing_and_failed_retrospective_preserve_stow
 test_duplicate_running_worker_and_restart_recovery
+test_orphaned_agent_blocks_a_second_boundary
 test_pre_agent_interruption_remains_restartable
 test_manual_reservation_and_non_primary_stand_down
 test_snapshot_failure_refuses_both_hook_hosts
