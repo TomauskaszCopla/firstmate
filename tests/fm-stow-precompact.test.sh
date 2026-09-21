@@ -592,10 +592,10 @@ EOF
   kill -9 "$pid" 2>/dev/null || fail "could not interrupt fixture worker"
   i=0
   while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 100 ]; do sleep 0.05; i=$((i + 1)); done
-  rm -f -- "$hold"
   overlap=$home/agent-overlap
   run_reconcile "$home" "$fakebin" FM_TEST_OLD_AGENT_PGID="$pgid" \
     FM_TEST_AGENT_OVERLAP="$overlap" || fail "session-start reconciliation failed"
+  rm -f -- "$hold"
   wait_for_file "$job/completion.json" || fail "restarted worker did not complete"
   launches=$(jq -r '.launch_attempts' "$job/receipt.json")
   [ "$launches" = 2 ] || fail "interrupted worker was not restarted exactly once: $launches"
