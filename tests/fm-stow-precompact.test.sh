@@ -84,6 +84,7 @@ stow_status=complete
 stow_safe=true
 retro_status=no-change
 [ "${FM_TEST_STOW_FAIL:-}" != 1 ] || { stow_status=failed; stow_safe=false; }
+[ "${FM_TEST_STOW_INCOMPLETE:-}" != 1 ] || { stow_status=incomplete; stow_safe=false; }
 [ "${FM_TEST_RETRO_FAIL:-}" != 1 ] || retro_status=failed
 jq -n --arg stow_status "$stow_status" --argjson stow_safe "$stow_safe" \
   --argjson empty_evidence "${FM_TEST_EMPTY_EVIDENCE:-0}" \
@@ -332,8 +333,15 @@ EOF
     || fail "over-budget case did not start"
   job=$(job_dir "$home")
   wait_for_file "$job/completion.json" || fail "over-budget case published no completion"
-  jq -e '.state == "incomplete" and .reset_safe == false' "$job/completion.json" >/dev/null \
-    || fail "an over-budget Stow certified reset safety"
+  jq -e '
+    .state == "incomplete" and .reset_safe == false
+    and .stow.result.status == "complete"
+    and .stow.result.effective_budget_tokens == 100
+    and .stow.result.total_estimated_tokens_after == 120
+    and .retrospective.result.status == "no-change"
+    and .agent.process_rc == 0
+  ' "$job/completion.json" >/dev/null \
+    || fail "an over-budget Stow certified reset safety or lost its reported totals"
 
   record=$(make_home equal-budget)
   IFS=$'\t' read -r home fakebin <<EOF
@@ -349,6 +357,34 @@ EOF
   wait_for_file "$job/completion.json" || fail "equal-budget case published no completion"
   jq -e '.state == "complete" and .reset_safe == true' "$job/completion.json" >/dev/null \
     || fail "an equal-to-budget Stow was rejected"
+
+  record=$(make_home honest-incomplete)
+  IFS=$'\t' read -r home fakebin <<EOF
+$record
+EOF
+  transcript=$home/transcript.jsonl
+  printf '%s\n' '{}' > "$transcript"
+  input=$(payload "$home" "$transcript" manual)
+  run_hook "$home" "$fakebin" "$input" codex \
+    FM_TEST_STOW_INCOMPLETE=1 FM_TEST_EFFECTIVE_BUDGET=100 \
+    FM_TEST_TOKENS_BEFORE=140 FM_TEST_TOKENS_AFTER=120 \
+    FM_TEST_STOW_EXCEPTION="pinned captain memory cannot be pruned below the budget" >/dev/null \
+    || fail "honest incomplete case did not start"
+  job=$(job_dir "$home")
+  wait_for_file "$job/completion.json" || fail "honest incomplete case published no completion"
+  jq -e '
+    .state == "incomplete" and .reset_safe == false
+    and .stow.result.status == "incomplete"
+    and .stow.result.effective_budget_tokens == 100
+    and .stow.result.total_estimated_tokens_before == 140
+    and .stow.result.total_estimated_tokens_after == 120
+    and (.stow.result.exceptions
+      == ["pinned captain memory cannot be pruned below the budget"])
+    and .retrospective.result.status == "no-change"
+    and (.retrospective.result.proof | length > 0)
+    and .agent.process_rc == 0
+  ' "$job/completion.json" >/dev/null \
+    || fail "an honest over-budget incomplete result was replaced by a generic failure"
   pass "post-pass totals must not exceed the effective memory budget"
 }
 
