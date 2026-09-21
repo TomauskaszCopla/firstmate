@@ -283,6 +283,8 @@ The synchronous hook freezes the exact transcript prefix and a structured fleet 
 Linked task worktrees, secondmate homes, foreign-host duplicate hook deliveries, detached Stow workers, and sessions that do not own this home's session lock stand down without creating a job.
 
 The detached worker holds `state/.stow-memory-writer.lock` and launches exactly one headless agent through the provider that invoked the hook: Codex for a Codex hook or Claude for a Claude hook, with no cross-provider fallback.
+The detached agent honors the [Claude permission mode](#claude-permission-mode-configclaude-permission-mode) and [worker environment allowlist](#worker-launch-environment-configlaunch-env-allowlist); invalid configuration prevents agent launch and leaves the job not reset-safe.
+Both providers receive the generated job authority instructions in their input prompt, including the live-session mutation guard and its refusal disposition.
 That agent runs the primary home's local Stow pass without a secondmate cascade, then dynamically resolves and runs the current installed `ai-team-tomas-skills:retrospective` for the same provider in the same session.
 The worker writes `completion.json` only after the combined agent settles.
 The stage receipt distinguishes `hook_fired`, `snapshot_captured`, `worker_started`, the combined agent's started and settled boundaries, its process return code, the verified Retrospective entrypoint and hash, and terminal completion or failure.
@@ -444,7 +446,8 @@ Firstmate retains basic home, executable search, terminal, locale, temporary-dir
 [`fm-spawn.sh --help`](../bin/fm-spawn.sh) owns the exact retained names and parsing mechanics.
 Other ambient names must be listed explicitly, including custom credential-store locations, proxy settings, and certificate overrides when required by the selected tools.
 The command shell and worker may still create their own variables.
-Allowed values come from the destination pane at execution time; they are neither copied from the invoking Firstmate process nor written into the launch command.
+For terminal workers, allowed values come from the destination pane at execution time; they are neither copied from the invoking Firstmate process nor written into the launch command.
+Detached Stow agents receive allowed values from their parent worker environment at execution time.
 Listing a name does not provision it in a daemon's environment or transfer credentials to another machine.
 
 Choose the minimum additions for the authentication method actually in use:

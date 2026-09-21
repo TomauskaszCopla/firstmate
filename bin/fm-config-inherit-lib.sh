@@ -106,6 +106,51 @@ fm_config_source_present() {
   ' -- "$1"
 }
 
+fm_launch_env_names() {
+  local path=$1 present names
+  present=$(fm_config_source_present "$path") || return 1
+  [ "$present" = 1 ] || return 0
+  if [ ! -f "$path" ] || [ ! -r "$path" ]; then
+    echo "error: config/launch-env-allowlist must be a readable regular file" >&2
+    return 1
+  fi
+  names=$(jq -Rrs '
+    split("\n") | map(select(. != "" and (startswith("#") | not))) |
+    if all(.[]; test("^[A-Za-z_][A-Za-z0-9_]*$")) then .[]
+    else error("expected environment names only") end
+  ' "$path" 2>/dev/null) || {
+    echo "error: config/launch-env-allowlist must contain one environment name per line, blank lines, or # comments" >&2
+    return 1
+  }
+  printf '%s\n' HOME PATH USER LOGNAME SHELL TERM COLORTERM LANG LC_ALL LC_CTYPE \
+    TMPDIR TMP TEMP GOTMPDIR TMUX TMUX_PANE HERDR_ENV HERDR_SESSION HERDR_SOCKET_PATH \
+    HERDR_PANE_ID CMUX_WORKSPACE_ID CMUX_SURFACE_ID CMUX_TAB_ID CMUX_PANEL_ID \
+    CMUX_SOCKET_PATH ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID FM_ZELLIJ_SESSION \
+    FM_TASK_ID COMPACT_ADVISER_DISABLE LAVISH_AXI_HOST
+  [ -z "$names" ] || printf '%s\n' "$names"
+  return 0
+}
+
+fm_claude_permission_mode() {
+  local path=$1 present mode=bypass
+  present=$(fm_config_source_present "$path") || return 1
+  if [ "$present" = 1 ]; then
+    if [ ! -f "$path" ] || [ ! -r "$path" ]; then
+      echo "error: config/claude-permission-mode must be a readable regular file holding one of: bypass, auto" >&2
+      return 1
+    fi
+    mode=$(tr -d '[:space:]' < "$path") || return 1
+    case "$mode" in
+      bypass|auto) ;;
+      *)
+        echo "error: config/claude-permission-mode holds '$mode'; accepted values are: bypass (--dangerously-skip-permissions, the default when the file is absent), auto (--permission-mode auto)" >&2
+        return 1
+        ;;
+    esac
+  fi
+  printf '%s\n' "$mode"
+}
+
 fm_inherit_file_mode() {
   if [ "$(uname)" = Darwin ]; then
     /usr/bin/stat -f %Lp "$1" 2>/dev/null

@@ -73,6 +73,7 @@ if [ "${1:-}" = plugin ] && [ "${2:-}" = list ]; then
   fi
   exit 0
 fi
+printf '%s\n' "$@" > "$FM_HOME/agent-argv"
 result=
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -81,9 +82,13 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ -n "$result" ] || exit 2
-cat >/dev/null
+cat > "$FM_HOME/delivered-prompt.md"
+printf '%s' "${FM_TEST_BYTES-}" > "$FM_HOME/agent-bytes"
+jq -n 'env | {FM_TEST_ALLOWED,FM_TEST_EXCLUDED,FM_TEST_EMPTY,permission_mode,names,HOME,PATH,
+  FM_STOW_HOOK_WORKER,FM_HOME,FM_ROOT_OVERRIDE,FM_STATE_OVERRIDE,FM_DATA_OVERRIDE,
+  FM_CONFIG_OVERRIDE,COMPACT_ADVISER_DISABLE}' > "$FM_HOME/agent-env.json"
 case "$result" in */combined-result.json) ;; *) exit 2 ;; esac
-printf 'codex\n' >> "${FM_TEST_AGENT_LOG:?}"
+printf 'codex\n' >> "${FM_TEST_AGENT_LOG:-$FM_HOME/agent.log}"
 if [ -n "${FM_TEST_AGENT_HOLD:-}" ]; then
   : > "$FM_TEST_AGENT_HOLD.ready"
   while [ -e "$FM_TEST_AGENT_HOLD" ]; do sleep 0.05; done
@@ -107,7 +112,7 @@ jq -n --arg stow_status "$stow_status" --argjson stow_safe "$stow_safe" \
   --arg retro_status "$retro_status" \
   --arg stow_exception "${FM_TEST_STOW_EXCEPTION:-}" \
   --arg retro_exception "${FM_TEST_RETRO_EXCEPTION:-}" \
-  --arg entry "$CODEX_HOME/plugins/cache/ai-team-skills/ai-team-tomas-skills/9.8.7/skills/retrospective/SKILL.md" '
+  --arg entry "${CODEX_HOME:-$FM_HOME/codex-home}/plugins/cache/ai-team-skills/ai-team-tomas-skills/9.8.7/skills/retrospective/SKILL.md" '
   {stow:(({status:$stow_status,reset_safe:$stow_safe,summary:"stowed",
          memory_actions:(if $empty_evidence == 1 then [] else [
            {path:"data/captain.md",action:"unchanged",detail:"within budget"},
@@ -139,8 +144,13 @@ if [ "${1:-}" = plugin ] && [ "${2:-}" = list ]; then
   fi
   exit 0
 fi
-cat >/dev/null
-printf 'claude\n' >> "${FM_TEST_AGENT_LOG:?}"
+cat > "$FM_HOME/delivered-prompt.md"
+printf '%s' "${FM_TEST_BYTES-}" > "$FM_HOME/agent-bytes"
+jq -n 'env | {FM_TEST_ALLOWED,FM_TEST_EXCLUDED,FM_TEST_EMPTY,permission_mode,names,HOME,PATH,
+  FM_STOW_HOOK_WORKER,FM_HOME,FM_ROOT_OVERRIDE,FM_STATE_OVERRIDE,FM_DATA_OVERRIDE,
+  FM_CONFIG_OVERRIDE,COMPACT_ADVISER_DISABLE}' > "$FM_HOME/agent-env.json"
+printf '%s\n' "$@" > "$FM_HOME/agent-argv"
+printf 'claude\n' >> "${FM_TEST_AGENT_LOG:-$FM_HOME/agent.log}"
 if [ -n "${FM_TEST_AGENT_HOLD:-}" ]; then
   : > "$FM_TEST_AGENT_HOLD.ready"
   while [ -e "$FM_TEST_AGENT_HOLD" ]; do sleep 0.05; done
@@ -305,6 +315,104 @@ EOF
       || fail "$harness hook invoked another provider or more than one agent"
   done
   pass "each hook runs one provider-matched agent with no fallback"
+}
+
+test_detached_launch_policy() {
+  local harness setting record home fakebin input job expected
+  for harness in codex claude; do
+    for setting in absent enabled empty invalid unreadable; do
+      record=$(make_home "launch-env-$harness-$setting")
+      IFS=$'\t' read -r home fakebin <<EOF
+$record
+EOF
+      mkdir -p "$home/config"
+      case "$setting" in
+        enabled) printf '# allowed names\nFM_TEST_ALLOWED\nFM_TEST_EMPTY\npermission_mode\nnames\nFM_TEST_BYTES\n' > "$home/config/launch-env-allowlist" ;;
+        empty) : > "$home/config/launch-env-allowlist" ;;
+        invalid) printf 'FM_TEST_ALLOWED=unsafe\n' > "$home/config/launch-env-allowlist" ;;
+        unreadable) ln -s "$home/missing-allowlist" "$home/config/launch-env-allowlist" ;;
+      esac
+      printf '{}\n' > "$home/transcript.jsonl"
+      input=$(payload "$home" "$home/transcript.jsonl" manual)
+      run_hook "$home" "$fakebin" "$input" "$harness" \
+        FM_TEST_ALLOWED=$'quoted "value"\nnext line\n' FM_TEST_EMPTY= \
+        FM_TEST_EXCLUDED=excluded COMPACT_ADVISER_DISABLE=0 permission_mode=sentinel names=original \
+        FM_TEST_BYTES=$'\xff\n' >/dev/null \
+        || fail "$harness $setting environment hook failed"
+      job=$(job_dir "$home")
+      wait_for_file "$job/completion.json" || fail "$harness $setting never settled"
+      case "$setting" in
+        invalid|unreadable)
+          [ ! -e "$home/agent-env.json" ] && [ ! -s "$home/agent.log" ] \
+            || fail "$harness launched with a rejected environment configuration"
+          jq -e '.reset_safe == false' "$job/completion.json" >/dev/null \
+            || fail "rejected environment configuration certified reset safety"
+          continue
+          ;;
+      esac
+      if [ "$setting" = empty ]; then
+        [ ! -s "$home/agent-bytes" ] || fail "filtered non-UTF-8 value survived"
+      else
+        cmp -s <(printf '%s' $'\xff\n') "$home/agent-bytes" \
+          || fail "$harness $setting changed environment bytes"
+      fi
+      jq -e --arg setting "$setting" --arg home "$home" --arg path "$fakebin:$BASE_PATH" \
+        --arg allowed $'quoted "value"\nnext line\n' '
+        .PATH == $path and (.HOME | length > 0)
+        and .FM_STOW_HOOK_WORKER == "1" and .FM_HOME == $home
+        and .FM_ROOT_OVERRIDE == $home and .FM_STATE_OVERRIDE == ($home + "/state")
+        and .FM_DATA_OVERRIDE == ($home + "/data") and .FM_CONFIG_OVERRIDE == ($home + "/config")
+        and .COMPACT_ADVISER_DISABLE == "1"
+        and .FM_TEST_EXCLUDED == (if $setting == "absent" then "excluded" else null end)
+        and .FM_TEST_ALLOWED == (if $setting == "empty" then null else $allowed end)
+        and .FM_TEST_EMPTY == (if $setting == "empty" then null else "" end)
+        and .permission_mode == (if $setting == "empty" then null else "sentinel" end)
+        and .names == (if $setting == "empty" then null else "original" end)
+      ' "$home/agent-env.json" >/dev/null || fail "$harness $setting environment policy mismatch"
+      jq -e '.state == "complete" and .reset_safe == true' "$job/completion.json" >/dev/null \
+        || fail "$harness $setting environment prevented normal completion"
+    done
+  done
+  for setting in absent auto bypass invalid unreadable; do
+    record=$(make_home "claude-permission-$setting")
+    IFS=$'\t' read -r home fakebin <<EOF
+$record
+EOF
+    mkdir -p "$home/config"
+    case "$setting" in
+      auto|bypass|invalid) printf '%s\n' "$setting" > "$home/config/claude-permission-mode" ;;
+      unreadable) ln -s "$home/missing-permission-mode" "$home/config/claude-permission-mode" ;;
+    esac
+    printf '{}\n' > "$home/transcript.jsonl"
+    input=$(payload "$home" "$home/transcript.jsonl" manual)
+    run_hook "$home" "$fakebin" "$input" claude >/dev/null || fail "permission hook failed"
+    job=$(job_dir "$home")
+    wait_for_file "$job/completion.json" || fail "permission case never settled"
+    case "$setting" in
+      invalid|unreadable)
+        [ ! -e "$home/agent-argv" ] && [ ! -s "$home/agent.log" ] \
+          || fail "Claude launched with rejected permission configuration"
+        jq -e '.reset_safe == false' "$job/completion.json" >/dev/null \
+          || fail "rejected permission configuration certified reset safety"
+        continue
+        ;;
+    esac
+    expected=bypassPermissions
+    [ "$setting" != auto ] || expected=auto
+    [ "$(awk '/^--permission-mode$/{getline;print}' "$home/agent-argv")" = "$expected" ] \
+      || fail "Claude did not honor $setting permission mode"
+    jq -e '.state == "complete" and .reset_safe == true' "$job/completion.json" >/dev/null \
+      || fail "valid Claude permission setting prevented completion"
+    grep -Fq "$home/bin/fm-stow-precompact.sh guard --job ${job##*/}" "$home/delivered-prompt.md" \
+      || fail "Claude did not receive its job-specific live-state guard"
+    grep -Fq 'If that guard refuses, stage the exact required action in the structured result, mark the Stow pass incomplete, and do not make that mutation.' "$home/delivered-prompt.md" \
+      || fail "Claude did not receive the guard-refusal disposition"
+    grep -Fq 'Never run spawn, teardown, lifecycle control, merge, install, or update commands.' "$home/delivered-prompt.md" \
+      || fail "Claude did not receive its lifecycle restrictions"
+    grep -Fq 'Do not create, replace, or release the memory writer lock.' "$home/delivered-prompt.md" \
+      || fail "Claude did not receive its lock-ownership restriction"
+  done
+  pass "detached providers honor launch policies and receive explicit authority instructions"
 }
 
 test_empty_evidence_prevents_reset_safety() {
@@ -1289,6 +1397,7 @@ EOF
 
 test_manual_and_auto_boundaries_deduplicate
 test_provider_matched_single_agent
+test_detached_launch_policy
 test_empty_evidence_prevents_reset_safety
 test_budget_bound_controls_reset_safety
 test_failures_are_terminal_and_retrospective_still_runs

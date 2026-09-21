@@ -699,7 +699,8 @@ EOF
   }
 }
 EOF
-  cat > "$workspace/combined-prompt.md" <<EOF
+  cat "$workspace/AGENTS.md" > "$workspace/combined-prompt.md" || return 1
+  cat >> "$workspace/combined-prompt.md" <<EOF
 Run these two passes in order in this one $harness agent session.
 
 First, run the selected internal Stow skill at $stow_skill.
@@ -732,8 +733,31 @@ EOF
 }
 
 run_harness_agent() { # <job> <harness> <workspace> <schema> <result> <log> <prompt>
+  local -r inherited_env="$(perl -MMIME::Base64 -e '
+    print encode_base64(join("", map { "$_=$ENV{$_}\0" } keys %ENV))
+  ')"
+  [ -n "$inherited_env" ] || return 125
   local job=$1 harness=$2 workspace=$3 schema=$4 result=$5 log=$6 prompt=$7
   local barrier pid pgid identity started rc=0 i=0 monitor_was_on=0
+  local config=${FM_CONFIG_OVERRIDE:-$FM_HOME/config} names env_arg permission_mode
+  local -a launch_env
+  names=$(fm_launch_env_names "$config/launch-env-allowlist") || return 125
+  permission_mode=$(fm_claude_permission_mode "$config/claude-permission-mode") || return 125
+  [ "$permission_mode" != bypass ] || permission_mode=bypassPermissions
+  launch_env=(env -i)
+  while IFS= read -r -d '' env_arg; do
+    launch_env+=("$env_arg")
+  done < <(printf '%s' "$inherited_env" | perl -MMIME::Base64 -e '
+    my %allowed = map { $_ => 1 } split /\n/, $ARGV[0];
+    local $/;
+    for my $entry (split /\0/, decode_base64(<STDIN>)) {
+      my ($name) = split /=/, $entry, 2;
+      print "$entry\0" if $ARGV[0] eq "" || $allowed{$name};
+    }
+  ' "$names")
+  launch_env+=(FM_STOW_HOOK_WORKER=1 FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT"
+    FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" FM_CONFIG_OVERRIDE="$config"
+    COMPACT_ADVISER_DISABLE=1)
   barrier=$workspace/.start-agent.$RANDOM
   rm -f -- "$barrier"
   case $- in *m*) monitor_was_on=1 ;; esac
@@ -746,7 +770,7 @@ run_harness_agent() { # <job> <harness> <workspace> <schema> <result> <log> <pro
     [ -e "$barrier" ] || exit 125
     case "$harness" in
       codex)
-        env FM_STOW_HOOK_WORKER=1 FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" \
+        "${launch_env[@]}" \
           "$STOW_CODEX_BIN" -a never -s workspace-write --disable hooks \
             -c 'sandbox_workspace_write.network_access=true' exec \
             --ephemeral --skip-git-repo-check -C "$workspace" --add-dir "$FM_HOME" \
@@ -755,8 +779,8 @@ run_harness_agent() { # <job> <harness> <workspace> <schema> <result> <log> <pro
         ;;
       claude)
         cd "$workspace" || exit 125
-        env FM_STOW_HOOK_WORKER=1 FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" \
-          "$STOW_CLAUDE_BIN" -p --safe-mode --permission-mode bypassPermissions \
+        "${launch_env[@]}" \
+          "$STOW_CLAUDE_BIN" -p --safe-mode --permission-mode "$permission_mode" \
             --no-session-persistence --output-format json \
             --tools 'Bash,Read,Write,Edit,Glob,Grep' --add-dir "$FM_HOME" \
             --json-schema "$(cat "$schema")" < "$prompt" > "$log" 2>&1 \
