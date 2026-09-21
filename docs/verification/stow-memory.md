@@ -9,25 +9,8 @@ The internal [`stow` skill](../../.agents/skills/stow/SKILL.md) owns tiering, cu
 ## Pre-compaction execution boundary
 
 [`bin/fm-stow-precompact.sh`](../../bin/fm-stow-precompact.sh) owns the automatic path and its private receipt schemas.
-The Codex and Claude registrations are synchronous only through durable boundary capture and a verified detached-worker handshake.
-The detached worker launches exactly one agent through the invoking provider, with no cross-provider fallback.
-That agent runs local Stow first, then dynamically resolves and runs the installed Retrospective for the same provider in the same session; only then can the worker publish `completion.json`.
-The hook does not wait for completion, so only capture-before-compaction is guaranteed and completion is asynchronous.
+The [automatic pre-compaction Stow contract](../configuration.md#automatic-pre-compaction-stow) owns provider matching, completion, primary-only scope, serialization, recovery, and retention behavior.
 The live guard deliberately holds the detached worker across hook return to prove survival and later completion without claiming that every fast run finishes after hook return.
-Automatic Stow is primary-only.
-It never launches secondmate curation or writes a registered secondmate home; an explicit primary `/stow` retains the existing cascade.
-
-The combined agent records one started boundary, one settled boundary, and one process return code.
-Reconciliation reuses a settled combined result and never replays a started-but-unsettled combined agent whose side effects are uncertain.
-A capture attempt stopped before publication is promoted when its boundary was fully captured, and is otherwise settled as a failed capture.
-The worker records the agent's isolated process group before releasing its start barrier, and lock-owner reconciliation retires a verified surviving group before it starts a replacement worker.
-An identity-mismatched or leaderless numeric process group is preserved and reported instead of being signalled or overlapped.
-The ordinary session-start path invokes reconciliation immediately after successful fleet-lock acquisition, including resume and re-emit flows.
-
-Terminal job and failed-attempt evidence is retained for 14 days and then pruned during capture or reconciliation.
-Running, recoverable, and unresolved staged evidence is not age-pruned.
-There is no explicit cancellation path or blind active-work time-to-live.
-An explicit Stow keeps its exclusion until the pass completes or the owning session ends.
 
 Focused coverage is in [`tests/fm-stow-precompact.test.sh`](../../tests/fm-stow-precompact.test.sh).
 Real Codex hook coverage is in [`tests/fm-stow-precompact-live-e2e.test.sh`](../../tests/fm-stow-precompact-live-e2e.test.sh) and must use a disposable standalone repository because installed Codex project-hook discovery from linked worktrees is not a reliable proof surface.

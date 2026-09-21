@@ -293,8 +293,9 @@ An explicit `/stow` uses `state/.stow-manual-reservation.json`; automatic compac
 
 Session-start reconciliation runs after successful fleet-lock acquisition.
 It retires a verified surviving agent process group before replacement, restarts a nonterminal worker from frozen evidence, reuses a settled combined result, never replays a started-but-unsettled combined agent, or finalizes a completion that was published just before interruption.
-A process group whose ownership cannot be proved blocks replacement instead of being signalled or overlapped, and a boundary blocked by another home's surviving agent stays recoverable rather than terminal.
-A capture attempt stopped by an earlier session is promoted to its deduplicated job when its boundary was fully captured, and is otherwise recorded as a failed, not reset-safe capture.
+A process group whose ownership cannot be proved blocks replacement instead of being signalled or overlapped, and a boundary blocked by another job's surviving agent in the same home stays recoverable rather than terminal.
+Reconciliation leaves a capture attempt untouched while its recorded hook process identity is still alive, even when the primary session re-emits its startup digest.
+A stopped capture attempt is promoted to its deduplicated job when its boundary was fully captured, and is otherwise recorded as a failed, not reset-safe capture, including when its original primary session remains alive.
 A missing or failed Retrospective preserves completed local Stow writes but leaves the combined receipt incomplete and not reset-safe.
 Settled terminal evidence is pruned after 14 days; running, recoverable, and unresolved staged evidence is retained.
 There is no explicit cancellation feature or active-work time-to-live, so an explicit Stow retains exclusion until its pass completes or its owning session ends.
