@@ -14,6 +14,8 @@ The live guard deliberately holds the detached worker across hook return to prov
 
 Focused coverage is in [`tests/fm-stow-precompact.test.sh`](../../tests/fm-stow-precompact.test.sh).
 Real Codex hook coverage is in [`tests/fm-stow-precompact-live-e2e.test.sh`](../../tests/fm-stow-precompact-live-e2e.test.sh) and must use a disposable standalone repository because installed Codex project-hook discovery from linked worktrees is not a reliable proof surface.
+The live suite substitutes session-lock ownership and the fleet snapshot; its hook cases also substitute the detached agent, while a separate case runs the real Codex worker.
+Those cases do not establish live fleet ownership or real-provider recovery behavior.
 
 On 2026-09-21, the focused portable suite passed with:
 
@@ -50,8 +52,8 @@ ok - codex-cli 0.155.1 isolated real worker completed Stow then the current inst
 all real Codex pre-compaction Stow assertions passed
 ```
 
-Installed-Claude compaction also remains unproved: Claude Code returned `credits_required` before a disposable conversation could be created.
-Do not treat the portable provider fakes or source inspection as live Claude proof.
+Installed-Claude compaction proof remains deferred.
+Claude-side verification is limited to the fast local deterministic adapter fixtures in the focused suite; do not run installed-Claude compaction tests or treat fixture results as live Claude proof.
 
 ## Git-excluded local skill discovery and loading
 
