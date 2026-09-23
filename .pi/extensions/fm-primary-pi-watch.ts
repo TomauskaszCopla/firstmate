@@ -94,6 +94,7 @@ type WatchToolRenderContext = {
 type UnconsumedWake = {
   content: string;
   pending: PendingActionableClose;
+  accepted: boolean;
 };
 
 type SessionGeneration = {
@@ -578,9 +579,24 @@ export default function (pi: ExtensionAPI) {
       "watcher",
       `FIRSTMATE WATCHER WAKE: ${message}\n\nRun bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.`,
     );
-    if (pending) owner.unconsumedWakes.set(pending.token, { content, pending });
+    // Pi cannot retract or edit a queued follow-up. A queued wake already tells
+    // main to drain the durable queue, which includes every later routine row.
+    // Keep each close pending until that wake is consumed so replacement can
+    // replay it; never hide a watcher/continuity failure behind a routine wake.
+    if (pending && /^(signal:|stale:)/.test(message) && !message.includes("watcher: FAILED")) {
+      const queued = owner.unconsumedWakes.values().next().value;
+      if (queued?.accepted && !queued.content.includes("watcher: FAILED")) {
+        owner.unconsumedWakes.set(pending.token, { content: queued.content, pending, accepted: true });
+        return generationIsLive(owner);
+      }
+    }
+    if (pending) owner.unconsumedWakes.set(pending.token, { content, pending, accepted: false });
     try {
       await pi.sendUserMessage(content, { deliverAs: "followUp" });
+      if (pending) {
+        const wake = owner.unconsumedWakes.get(pending.token);
+        if (wake) wake.accepted = true;
+      }
     } catch (error) {
       if (pending) owner.unconsumedWakes.delete(pending.token);
       throw error;
@@ -604,7 +620,6 @@ export default function (pi: ExtensionAPI) {
         surfaceCleanupFailure(owner, error);
         schedulePendingCleanup(owner);
       }
-      return;
     }
   }
 

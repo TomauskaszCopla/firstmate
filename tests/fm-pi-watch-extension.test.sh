@@ -1848,9 +1848,11 @@ const pi = {
   registerTool(candidate) {
     if (candidate.name === "fm_watch_arm_pi") tool = candidate;
   },
-  // Nothing here consumes the follow-up: continuity must not depend on it.
+  // Consume the first fallback before the late close, so the later wake
+  // must still reach main rather than coalescing behind an unread prompt.
   sendUserMessage: async (message) => {
     prompts.push(message);
+    handlers.get("message_start")?.({ message: { role: "user", content: [{ type: "text", text: message }] } }, {});
   },
 };
 const rows = () => existsSync(process.env.FM_ARM_LOG)
@@ -2730,7 +2732,11 @@ count=$(grep -c '^arm=' "$FM_ARM_LOG")
 printf 'watcher: started pid=%s (beacon fresh) recovery-generation=chain-%s\n' "$$" "$count"
 trap 'exit 0' TERM INT
 while [ ! -e "$FM_TRIGGER_FILE.$count" ]; do sleep 0.02; done
-printf 'signal: streaming chain wake %s\n' "$count"
+if [ "$count" -eq 3 ]; then
+  printf 'check: main-only merge outcome\n'
+else
+  printf 'signal: streaming chain wake %s\n' "$count"
+fi
 exit 0
 SH
   chmod +x "$repo/bin/fm-watch-arm.sh"
@@ -2785,36 +2791,48 @@ await waitFor(() => prompts.length === 1, "first wake delivered while main strea
 if (wakes("signal: streaming chain wake 1") !== 1) throw new Error(`wrong first wake: ${prompts.join(" | ")}`);
 await waitFor(() => arms() === 2, "successor after the streaming-time delivery");
 writeFileSync(`${process.env.FM_TRIGGER_FILE}.2`, "close\n");
-await waitFor(() => prompts.length === 2, "second wake delivered while main still streams");
-if (wakes("signal: streaming chain wake 2") !== 1) throw new Error(`wrong second wake: ${prompts.join(" | ")}`);
 await waitFor(() => arms() === 3, "successor after the second streaming-time delivery");
+if (prompts.length !== 1) throw new Error(`redundant busy-main follow-up was queued: ${prompts.join(" | ")}`);
+writeFileSync(`${process.env.FM_TRIGGER_FILE}.3`, "close\n");
+await waitFor(() => arms() === 4, "successor after the main-only check");
+await waitFor(() => prompts.length === 2, "main-only check has its own follow-up");
+if (wakes("check: main-only merge outcome") !== 1) throw new Error(`main-only check was coalesced: ${prompts.join(" | ")}`);
 if (beforeAgentStarts !== 0) throw new Error(`streaming follow-ups raised before_agent_start ${beforeAgentStarts} times`);
 
-// The run reaches the first queued follow-up; the second is still queued when
-// the captain replaces the session, so only the second rides the handoff.
-consumeQueued(prompts[0]);
+// The second close stays in the durable handoff across a replacement even
+// though Pi accepted just the first routine follow-up.
+// The replacement still queues just one prompt.
 await handlers.get("session_shutdown")?.({ type: "session_shutdown", reason: "new" }, {});
 const handoffPath = `${process.env.FM_HOME}/state/extensions/pi-primary-watch/session-replacement-actionable.json`;
 const handoff = JSON.parse(readFileSync(handoffPath, "utf8"));
-if (handoff.pending.length !== 1 || handoff.pending[0].delivered || !handoff.pending[0].message.includes("signal: streaming chain wake 2")) {
-  throw new Error(`replacement handoff did not carry exactly the unconsumed wake: ${JSON.stringify(handoff)}`);
+if (handoff.pending.length !== 3 || handoff.pending.some((row) => row.delivered) ||
+    !handoff.pending.some((row) => row.message.includes("signal: streaming chain wake 2")) ||
+    !handoff.pending.some((row) => row.message.includes("check: main-only merge outcome"))) {
+  throw new Error(`replacement handoff lost a coalesced wake: ${JSON.stringify(handoff)}`);
 }
-streaming = false;
+streaming = true;
 const replacementMod = await import(`${pathToFileURL(process.env.PLUGIN).href}?replacement=streaming-chain`);
 replacementMod.default(pi);
 await handlers.get("session_start")?.({ type: "session_start", reason: "new" }, {});
-await waitFor(() => prompts.length === 3, "replacement replay of the unconsumed wake");
-if (wakes("signal: streaming chain wake 2") !== 2 || wakes("signal: streaming chain wake 1") !== 1) {
-  throw new Error(`replacement replayed the wrong wakes: ${prompts.join(" | ")}`);
+await waitFor(() => arms() === 5, "replacement arm");
+await waitFor(() => prompts.length === 4, "replacement replay of coalesced wakes and check");
+if (wakes("signal: streaming chain wake 1") !== 2 || wakes("signal: streaming chain wake 2") !== 0 ||
+    wakes("check: main-only merge outcome") !== 2) {
+  throw new Error(`replacement lost check or queued redundant follow-ups: ${prompts.join(" | ")}`);
 }
-if (beforeAgentStarts !== 1) throw new Error(`idle replay raised before_agent_start ${beforeAgentStarts} times`);
-await waitFor(() => arms() === 4, "replacement arm");
-await waitFor(() => !existsSync(handoffPath), "consumed replay clears its handoff record");
+consumeQueued(prompts[2]);
+consumeQueued(prompts[3]);
+await waitFor(() => !existsSync(handoffPath), "consumed replay clears all handoff records");
+writeFileSync(`${process.env.FM_TRIGGER_FILE}.5`, "close\n");
+await waitFor(() => arms() === 6, "successor after later signal");
+if (prompts.length !== 5 || wakes("signal: streaming chain wake 5") !== 1) {
+  throw new Error(`wake after consumption was suppressed: ${prompts.join(" | ")}`);
+}
 process.exit(0);
 EOF
 )
   status=$?
-  expect_code 0 "$status" "Pi streaming-time wake delivery must keep the successor chain and replay only unconsumed wakes"
+  [ "$status" -eq 0 ] || fail "Pi streaming-time wake delivery must keep the successor chain and replay only unconsumed wakes: $out"
   [ -z "$out" ] || fail "Pi streaming-time delivery chain test printed output: $out"
   pass "Pi streaming-time wake delivery keeps the successor chain and replays only unconsumed wakes"
 }

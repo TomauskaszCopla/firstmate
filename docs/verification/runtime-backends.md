@@ -2111,6 +2111,24 @@ It proved that a follow-up the extension sends while main is streaming raises no
 The portable regression drives the same shape with a fake main that never raises `before_agent_start` while streaming, then proves a replacement replays only the follow-up Pi had not consumed and that an exhausted restoration delivers its typed failure without launching a further arm.
 A second regression holds a branch settlement open while the verified successor exits with a failure, and proves that failure takes the ordinary bounded retry once the delivery settles rather than leaving the generation with no watcher and no retry.
 
+### 2026-09-23 queued Pi watcher presentation
+
+On macOS arm64 with Node v26.8.2 and installed Pi SDK 0.86.0, the following commands passed against an isolated home; the live SDK probe intercepted provider calls and did not use the captain's session.
+
+```sh
+bin/fm-test-run.sh tests/fm-pi-watch-extension.test.sh tests/fm-pi-primary-types.test.sh
+FM_PI_BRANCH_LIVE_E2E=1 bin/fm-test-run.sh tests/fm-pi-branch-live-e2e.test.sh
+```
+
+```text
+ok - Pi streaming-time wake delivery keeps the successor chain and replays only unconsumed wakes
+ok - tracked Pi extensions pass strict no-emit typecheck against Pi 0.86.0
+ok - real Pi SDK 0.86.0 queues a streaming-time watcher wake without before_agent_start, keeps the successor chain, and surfaces consumption of both follow-ups
+```
+
+The portable watcher probe asserts that a second signal while main is busy creates no second Pi follow-up, both closes remain available to replacement, a main-only check still receives its own follow-up, consumption clears all three, and a later signal produces a new follow-up.
+The real SDK guard verifies Pi's follow-up delivery and consumption behavior, but does not render the coalesced queue in a real TUI; the visible screenshot outcome after deploying this extension remains to be verified.
+
 ### 2026-09-04 off-thread supervision outcome delivery
 
 The real-TUI responsiveness guard, focused extension suite, store suite, and strict typecheck were run on macOS 26.5.0 arm64, Node v24.13.1, tmux 3.6a, against the signed Pi launcher 0.82.0 for the TUI arms and the npm `@earendil-works/pi-coding-agent` 0.81.1 package for the typecheck.
