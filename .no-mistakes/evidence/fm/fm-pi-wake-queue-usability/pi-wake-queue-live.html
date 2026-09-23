@@ -1,0 +1,159 @@
+<!doctype html><meta charset=utf-8><title>Live Pi wake queue</title><style>body{background:#151515;color:#e6e6e6;font:15px/1.35 Menlo,monospace;padding:24px}pre{white-space:pre-wrap}</style><pre>tb@CU043 01M371EVJ0WZA5MJYTFY6FKP2R % bash .lab-wakequeue
+/launch.sh
+.lab-wakequeue/launch.sh: line 6: BASHPID: unbound variab
+le
+tb@CU043 01M371EVJ0WZA5MJYTFY6FKP2R % bash .lab-wakequeue
+/launch.sh
+
+ pi v0.86.0
+ escape interrupt · ctrl+c/ctrl+d clear/exit · /
+ commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded
+ resources.
+
+ Pi can explain its own features and look up its docs.
+ Ask it how to use or extend Pi.
+
+[Skills]
+  afk, ahoy, ask-user-authority, bearings,
+bootstrap-diagnostics, captain-hold-lifecycle,
+codebase-memory, decision-hold-lifecycle,
+diagnostic-reasoning, ego-browser, firstmate-codexapp,
+firstmate-coding-guidelines, firstmate-orca, fmx-respond,
+harness-adapters, impeccable, mcp-scripting, no-mistakes,
+orca-cli, orchestration, pi-lens-ast-grep,
+pi-lens-lsp-navigation, pi-lens-write-ast-grep-rule,
+pi-lens-write-tree-sitter-rule, ponytail, ponytail-audit,
+ponytail-debt, ponytail-gain, ponytail-help,
+ponytail-review, process-event-sources,
+project-management, quiet, quota-array-dispatch,
+secondmate-provisioning, stow, stuck-crewmate-recovery,
+updatefirstmate
+
+[Extensions]
+  fm-primary-pi-watch.ts
+
+
+─────────────────────────────────────────────────────────
+ Update Available
+ New version 0.87.1 is available. Run pi update
+ Changelog: https://pi.dev/changelog
+─────────────────────────────────────────────────────────
+
+
+ Call fm_watch_arm_pi once to start supervision. Then
+ reply READY_FOR_WAKES. Do not edit files.
+
+
+
+ fm_watch_arm_pi
+ watcher: unchanged - Pi extension already owns an arm
+ child; no manual re-arm needed; call fm_watch_arm_pi
+ again only after a later notification says the cycle is
+ missing, failed, or unhealthy
+
+
+ READY_FOR_WAKES
+
+
+ FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE:
+ signal:
+ /Users/tb/.no-mistakes/worktrees/13e47def527a/01M371EVJ
+ 0WZA5MJYTFY6FKP2R/.lab-wakequeue/state/pi-e2e.status
+
+ Run bin/fm-wake-drain.sh first and handle the queued
+ wake. Watcher continuity is extension-owned.
+
+
+
+ $ bin/fm-wake-drain.sh (timeout 120s)
+
+ ... (8 earlier lines, ctrl+o to expand)
+ STATUS OUTCOME BACKSTOP (newest captain-facing task
+ event has no covering branch outcome):
+ pi-e2e done: live queue A
+ WARNING: queued wakes pending - drain them with
+ bin/fm-wake-drain.sh before anything else.
+
+ Took 1.4s
+
+
+
+ $ bin/fm-wake-drain.sh (timeout 120s)
+
+ ... (8 earlier lines, ctrl+o to expand)
+ STATUS OUTCOME BACKSTOP (newest captain-facing task
+ event has no covering branch outcome):
+ pi-e2e done: live queue B
+ WARNING: queued wakes pending - drain them with
+ bin/fm-wake-drain.sh before anything else.
+
+ Took 0.8s
+
+
+
+ $ bin/fm-wake-drain.sh (timeout 120s)
+
+ ... (3 earlier lines, ctrl+o to expand)
+ WAKE_ACK_REQUIRED: after handling completes run
+ bin/fm-wake-drain.sh --ack-through 4
+ --recovery-generation 66062.1790164572.G39jDv
+ WARNING: queued wakes pending - drain them with
+ bin/fm-wake-drain.sh before anything else.
+
+ Took 0.8s
+
+
+
+ [skill] captain-hold-lifecycle:1-100 (ctrl+o to expand)
+
+
+
+ [skill] process-event-sources:1-100 (ctrl+o to expand)
+
+
+
+ $ rg -n &quot;pi-e2e|WAKE_ACK_REQUIRED&quot; . (timeout 120s)
+
+ ... (557 earlier lines, ctrl+o to expand)
+ --recovery-generation
+ \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p&#x27; &quot;$err&quot; | tail
+ -1)
+ ./bin/fm-supervise-daemon.sh:1503:  grep -v
+ &#x27;^WAKE_ACK_REQUIRED:&#x27; &quot;$err&quot; &gt;&amp;2 || true
+
+ Took 0.0s
+
+
+
+ read .lab-wakequeue/state/pi-e2e.status:1-50
+
+
+
+ read docs/supervision-protocols/pi.md:1-100
+
+
+
+ $ bin/fm-wake-drain.sh --ack-through 4
+ --recovery-generation 66062.1790164572.G39jDv &amp;&amp;
+ bin/fm-wake-drain.sh (timeout 120s)
+
+ ... (8 earlier lines, ctrl+o to expand)
+ STATUS OUTCOME BACKSTOP (newest captain-facing task
+ event has no covering branch outcome):
+ pi-e2e done: live queue C
+ WARNING: queued wakes pending - drain them with
+ bin/fm-wake-drain.sh before anything else.
+
+ Took 0.9s
+
+
+ Follow-up: FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCH...
+ ↳ Option+Up to edit all queued messages
+
+── ⠴ Working ────────────────────────────────────────────
+
+─────────────────────────────────────────────────────────
+~/.no-mistakes/worktrees/13e47def527a/01M371EVJ0WZA5MJ...
+↑35k ↓507 R81k CH92.5% 8.4%/272k (auto)  gpt-6-luna • low
+</pre>

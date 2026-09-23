@@ -1,0 +1,8 @@
+Real watcher cycle exits: 4
+cycle 1: reason=actionable-signal successor=started:66807
+cycle 2: reason=actionable-signal successor=started:83399
+cycle 3: reason=actionable-signal successor=started:93028
+cycle 4: reason=actionable-signal successor=started:38736
+Pi rendered watcher wake messages: 3
+Pi handled status A/B/C: True
+Pi drained later status D: True
